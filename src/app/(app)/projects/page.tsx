@@ -85,7 +85,7 @@ export default async function ProjectsPage() {
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
-                          <Link href={`/projects/${project.id}/research`}>
+                          <Link href={`/projects/${project.id}/chat`}>
                             Start Research
                           </Link>
                         </DropdownMenuItem>
