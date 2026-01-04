@@ -64,7 +64,7 @@ export async function getCachedResults(
       .select('*')
       .eq('query_hash', queryHash)
       .eq('search_type', searchType)
-      .single()
+      .single() as { data: CachedSearchResult | null; error: unknown }
 
     if (error || !data) {
       return null
@@ -77,7 +77,7 @@ export async function getCachedResults(
       return null
     }
 
-    return data as CachedSearchResult
+    return data
   } catch {
     return null
   }
@@ -112,7 +112,7 @@ export async function cacheSearchResults(
       source_api: sourceApi,
       expires_at: expiresAt,
     }
-    await supabase.from('search_cache').upsert(cacheData, {
+    await supabase.from('search_cache').upsert(cacheData as never, {
       onConflict: 'query_hash',
     })
 
@@ -155,7 +155,7 @@ async function enforceStorageLimit(
       .select('id')
       .eq('search_type', searchType)
       .order('created_at', { ascending: true })
-      .limit(toDelete)
+      .limit(toDelete) as { data: { id: string }[] | null }
 
     if (oldEntries && oldEntries.length > 0) {
       const idsToDelete = oldEntries.map(e => e.id)
@@ -215,7 +215,7 @@ export async function getCacheStats(): Promise<{
         .eq('search_type', type)
         .order('created_at', { ascending: true })
         .limit(1)
-        .single()
+        .single() as { data: { created_at: string } | null }
 
       stats[type] = {
         count: count || 0,

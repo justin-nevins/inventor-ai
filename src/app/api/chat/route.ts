@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
       const { data: newConversation, error: convError } = await supabase
         .from('conversations')
-        .insert(conversationData)
+        .insert(conversationData as never)
         .select()
         .single() as { data: Conversation | null; error: unknown }
 
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
         content: assistantMessage,
       },
     ]
-    await supabase.from('messages').insert(messagesToInsert)
+    await supabase.from('messages').insert(messagesToInsert as never)
 
     return NextResponse.json({
       message: assistantMessage,

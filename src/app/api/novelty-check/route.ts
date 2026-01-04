@@ -5,7 +5,7 @@ import { runWebSearchAgent } from '@/lib/ai/web-search-agent'
 import { runRetailSearchAgent } from '@/lib/ai/retail-search-agent'
 import { runPatentSearchAgent } from '@/lib/ai/patent-search-agent'
 import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores } from '@/lib/ai/types'
-import type { AiMemoryInsert } from '@/types/database'
+import type { AiMemoryInsert, Json } from '@/types/database'
 
 export async function POST(request: Request) {
   try {
@@ -121,12 +121,12 @@ export async function POST(request: Request) {
         memory_type: 'insight',
         content: {
           type: 'novelty_check',
-          results: response,
+          results: response as unknown as Json,
           timestamp: new Date().toISOString(),
-        },
+        } as Json,
         importance_score: overall_novelty_score,
       }
-      await supabase.from('ai_memory').insert(memoryData)
+      await supabase.from('ai_memory').insert(memoryData as never)
     }
 
     return NextResponse.json(response)

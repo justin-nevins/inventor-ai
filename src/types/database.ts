@@ -216,6 +216,41 @@ export interface Database {
           created_at?: string
         }
       }
+      search_cache: {
+        Row: {
+          id: string
+          query_hash: string
+          search_type: 'patent' | 'web' | 'retail'
+          query_params: Json
+          results: Json
+          result_count: number
+          source_api: string
+          created_at: string
+          expires_at: string | null
+        }
+        Insert: {
+          id?: string
+          query_hash: string
+          search_type: 'patent' | 'web' | 'retail'
+          query_params: Json
+          results: Json
+          result_count: number
+          source_api: string
+          created_at?: string
+          expires_at?: string | null
+        }
+        Update: {
+          id?: string
+          query_hash?: string
+          search_type?: 'patent' | 'web' | 'retail'
+          query_params?: Json
+          results?: Json
+          result_count?: number
+          source_api?: string
+          created_at?: string
+          expires_at?: string | null
+        }
+      }
     }
     Views: {
       [_ in never]: never

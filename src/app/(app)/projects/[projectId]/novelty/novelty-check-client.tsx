@@ -130,10 +130,10 @@ export function NoveltyCheckClient({
       url: finding.url,
       source: finding.source,
       similarityScore: finding.similarity_score,
-      patentNumber: finding.metadata?.patent_number || `Patent ${index + 1}`,
-      filingDate: finding.metadata?.filing_date || 'Unknown',
-      status: finding.metadata?.status,
-      aiConflictSummary: finding.metadata?.conflict_summary,
+      patentNumber: String(finding.metadata?.patent_number || `Patent ${index + 1}`),
+      filingDate: String(finding.metadata?.filing_date || 'Unknown'),
+      status: finding.metadata?.status as string | undefined,
+      aiConflictSummary: finding.metadata?.conflict_summary as string | undefined,
     }))
   }
 
@@ -145,8 +145,8 @@ export function NoveltyCheckClient({
       url: finding.url,
       source: finding.source,
       similarityScore: finding.similarity_score,
-      imageUrl: finding.metadata?.image_url,
-      aiConflictSummary: finding.metadata?.conflict_summary,
+      imageUrl: finding.metadata?.image_url as string | undefined,
+      aiConflictSummary: finding.metadata?.conflict_summary as string | undefined,
     }))
   }
 
@@ -158,10 +158,10 @@ export function NoveltyCheckClient({
       url: finding.url,
       source: finding.source,
       similarityScore: finding.similarity_score,
-      price: finding.metadata?.price_range || finding.metadata?.price,
-      imageUrl: finding.metadata?.image_url,
-      retailer: finding.metadata?.retailer,
-      aiConflictSummary: finding.metadata?.conflict_summary,
+      price: (finding.metadata?.price_range || finding.metadata?.price) as string | undefined,
+      imageUrl: finding.metadata?.image_url as string | undefined,
+      retailer: finding.metadata?.retailer as string | undefined,
+      aiConflictSummary: finding.metadata?.conflict_summary as string | undefined,
     }))
   }
 

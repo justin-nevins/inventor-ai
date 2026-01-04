@@ -170,7 +170,7 @@ export function NoveltyCheckButton({
                         <div className="flex-1">
                           <p className="font-medium text-sm">{finding.title}</p>
                           <p className="text-xs text-muted-foreground">{finding.description}</p>
-                          {finding.metadata?.price_range && (
+                          {typeof finding.metadata?.price_range === 'string' && (
                             <p className="text-xs text-muted-foreground mt-1">
                               Price: {finding.metadata.price_range}
                             </p>
@@ -212,7 +212,7 @@ export function NoveltyCheckButton({
                         <div className="flex-1">
                           <p className="font-medium text-sm">{finding.title}</p>
                           <p className="text-xs text-muted-foreground">{finding.description}</p>
-                          {finding.metadata?.status && (
+                          {typeof finding.metadata?.status === 'string' && (
                             <p className="text-xs text-muted-foreground mt-1">
                               Status: {finding.metadata.status}
                             </p>

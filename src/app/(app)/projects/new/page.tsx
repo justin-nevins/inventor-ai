@@ -49,7 +49,7 @@ export default function NewProjectPage() {
 
     const { data, error: insertError } = await supabase
       .from('projects')
-      .insert(projectData)
+      .insert(projectData as never)
       .select()
       .single() as { data: Project | null; error: PostgrestError | null }
 
