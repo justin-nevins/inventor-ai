@@ -233,7 +233,7 @@ ${NOVELTY_ANALYSIS_PROMPT.output}
 CRITICAL: Base your analysis ONLY on the search results provided above. Do not invent or imagine products that aren't in the results. Be honest about what the results do and don't tell us.`
 
   const response = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-3-haiku-20240307',
     max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   })

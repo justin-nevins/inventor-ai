@@ -31,7 +31,7 @@ const navItems = [
   },
   {
     title: 'AI Assistant',
-    href: '/dashboard',
+    href: '/chat',
     icon: MessageSquare,
   },
   {

@@ -325,7 +325,7 @@ CRITICAL: Base analysis ONLY on provided results. Focus on actual products for s
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -454,7 +454,7 @@ Products with higher similarity scores indicate the invention is LESS novel.`
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 4096,
       messages: [{ role: 'user', content: analysisPrompt }],
     })
