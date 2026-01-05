@@ -63,3 +63,56 @@ npm run lint     # Run ESLint
 
 ## Environment Variables
 See `.env.example` for required variables.
+
+---
+
+## Technical Audit (2026-01-04)
+
+### Current Implementation Status
+
+| Area                    | Status              | Notes                                      |
+|-------------------------|---------------------|---------------------------------------------|
+| Multi-Tenancy           | NOT IMPLEMENTED     | Single-user model only (no Organizations)  |
+| Vector Database / RAG   | NOT IMPLEMENTED     | OpenAI SDK installed but unused            |
+| Token Efficiency        | BASIC               | Fixed 20-message limit, 2048 max_tokens    |
+| System Prompt           | IMPLEMENTED         | Static constant in `/api/chat/route.ts`    |
+
+### Architecture Gaps
+
+1. **Multi-Tenancy**: No `organizations` table. All data isolated by `user_id` only via RLS.
+
+2. **RAG Pipeline**: Not implemented despite CLAUDE.md mentioning it.
+   - `knowledge_articles` table exists but has NO vector column
+   - No pgvector extension enabled
+   - No embedding generation
+   - No semantic search function
+
+3. **Token Efficiency**:
+   - Hard-coded 20-message history limit
+   - Fixed 2048 max_tokens output
+   - No input token counting
+   - No usage tracking per subscription tier
+
+4. **Chat Handler** (`src/app/api/chat/route.ts`):
+   - Context = System Prompt + Project Metadata ONLY
+   - No RAG retrieval injected
+   - No streaming responses
+
+### Files to Know
+
+| Purpose              | File                                           |
+|----------------------|------------------------------------------------|
+| Database Schema      | `supabase/migrations/0001_initial_schema.sql`  |
+| Type Definitions     | `src/types/database.ts`                        |
+| Chat API Handler     | `src/app/api/chat/route.ts`                    |
+| System Prompt        | `src/app/api/chat/route.ts` (lines 10-31)      |
+| Supabase Client      | `src/lib/supabase/server.ts`                   |
+
+### Next Steps (Suggested)
+
+- [ ] Add pgvector extension and embedding column to `knowledge_articles`
+- [ ] Implement embedding generation pipeline (OpenAI)
+- [ ] Add vector search function with user filtering
+- [ ] Inject RAG results into chat context
+- [ ] Add token counting before API calls
+- [ ] Consider `organizations` table for B2B multi-tenancy
