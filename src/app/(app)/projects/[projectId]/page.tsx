@@ -14,6 +14,7 @@ import {
   FileText,
   Play,
   CheckCircle,
+  FlaskConical,
 } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -25,13 +26,13 @@ interface ProjectPageProps {
 }
 
 const workflowSteps = [
-  { id: 'idea', label: 'Define Idea', icon: Target },
-  { id: 'communities', label: 'Find Communities', icon: Search },
-  { id: 'posts', label: 'Collect Posts', icon: MessageSquare },
-  { id: 'sentiment', label: 'Analyze Sentiment', icon: BarChart3 },
-  { id: 'simulation', label: 'Simulate Reactions', icon: Users },
-  { id: 'insights', label: 'Generate Insights', icon: FileText },
-  { id: 'decision', label: 'Make Decision', icon: CheckCircle },
+  { id: 'idea', label: 'Define Idea', icon: Target, href: null },
+  { id: 'communities', label: 'Find Communities', icon: Search, href: 'chat' },
+  { id: 'posts', label: 'Collect Posts', icon: MessageSquare, href: 'chat' },
+  { id: 'sentiment', label: 'Analyze Sentiment', icon: BarChart3, href: 'chat' },
+  { id: 'simulation', label: 'Simulate Reactions', icon: Users, href: 'chat' },
+  { id: 'insights', label: 'Generate Insights', icon: FileText, href: 'chat' },
+  { id: 'novelty', label: 'Novelty Check', icon: FlaskConical, href: 'novelty' },
 ]
 
 export default async function ProjectPage({ params }: ProjectPageProps) {
@@ -117,17 +118,17 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                 const isComplete = index < currentStepIndex
                 const isCurrent = index === currentStepIndex
                 const StepIcon = step.icon
+                const isClickable = step.href !== null
 
-                return (
+                const stepContent = (
                   <div
-                    key={step.id}
                     className={`flex flex-col items-center text-center p-3 rounded-lg transition-colors ${
                       isCurrent
                         ? 'bg-slate-900 text-white'
                         : isComplete
                         ? 'bg-green-50 text-green-700'
                         : 'bg-slate-50 text-slate-400'
-                    }`}
+                    } ${isClickable ? 'cursor-pointer hover:opacity-80' : ''}`}
                   >
                     <div
                       className={`h-10 w-10 rounded-full flex items-center justify-center mb-2 ${
@@ -146,6 +147,14 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
                     </div>
                     <span className="text-xs font-medium">{step.label}</span>
                   </div>
+                )
+
+                return isClickable ? (
+                  <Link key={step.id} href={`/projects/${project.id}/${step.href}`}>
+                    {stepContent}
+                  </Link>
+                ) : (
+                  <div key={step.id}>{stepContent}</div>
                 )
               })}
             </div>
@@ -189,7 +198,19 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
             <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <Link href={`/projects/${project.id}/chat`}>
+                <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  <span>AI Assistant</span>
+                </Button>
+              </Link>
+              <Link href={`/projects/${project.id}/novelty`}>
+                <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2">
+                  <FlaskConical className="h-5 w-5" />
+                  <span>Novelty Check</span>
+                </Button>
+              </Link>
               <Link href={`/projects/${project.id}/chat`}>
                 <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2">
                   <Search className="h-5 w-5" />
@@ -198,14 +219,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
               </Link>
               <Link href={`/projects/${project.id}/chat`}>
                 <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  <span>AI Assistant</span>
+                  <BarChart3 className="h-5 w-5" />
+                  <span>View Insights</span>
                 </Button>
               </Link>
-              <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2" disabled>
-                <BarChart3 className="h-5 w-5" />
-                <span>View Insights</span>
-              </Button>
               <Button variant="outline" className="w-full h-auto py-4 flex-col gap-2" disabled>
                 <FileText className="h-5 w-5" />
                 <span>Export Report</span>
