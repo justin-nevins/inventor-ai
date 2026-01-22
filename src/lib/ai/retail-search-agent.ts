@@ -117,7 +117,7 @@ function generateProductSearchQueries(
   // Generic shopping search
   queries.push(`${inventionName} for sale`)
 
-  return queries.slice(0, 4) // Limit to 4 queries
+  return queries.slice(0, 2) // Limit to 2 queries to preserve rate limits
 }
 
 /**
@@ -365,10 +365,26 @@ CRITICAL: Base analysis ONLY on provided results. Focus on actual products for s
 export async function runRetailSearchAgent(
   request: NoveltyCheckRequest
 ): Promise<NoveltyResult> {
-  // Check if eBay is configured - if not, use Brave Search fallback
+  // Check if eBay is configured - if not, return "not configured" result
+  // Previously this fell back to Brave, but that doubled Brave API usage
+  // causing unexpected rate limit exhaustion
   if (!isEbayConfigured()) {
-    console.log('eBay not configured, using Brave Search for retail discovery')
-    return runBraveRetailSearch(request)
+    console.log('eBay not configured, skipping retail search')
+    return {
+      agent_type: 'retail_search',
+      is_novel: true, // Can't determine, so assume novel
+      confidence: 0.3, // Low confidence due to no data
+      findings: [],
+      summary: 'Retail search skipped: eBay API not configured. To enable retail product search, add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET environment variables. Visit https://developer.ebay.com/my/keys to get API keys.',
+      truth_scores: {
+        objective_truth: 0,
+        practical_truth: 0,
+        completeness: 0,
+        contextual_scope: 0,
+      },
+      search_query_used: 'N/A - eBay not configured',
+      timestamp: new Date(),
+    }
   }
 
   // PHASE 1: Fetch real products from eBay
