@@ -237,6 +237,9 @@ function extractKeywords(text: string): string {
  * @param resultsPerQuery - Number of results per query
  * @returns Aggregated unique results
  */
+// Helper to add delay between API calls
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 export async function runMultipleSearches(
   queries: string[],
   resultsPerQuery: number = 5
@@ -245,7 +248,14 @@ export async function runMultipleSearches(
   const seenUrls = new Set<string>()
   let lastError: string | undefined
 
-  for (const query of queries) {
+  for (let i = 0; i < queries.length; i++) {
+    // Add 1.2 second delay between requests to respect Brave's free tier rate limit (1 req/sec)
+    if (i > 0) {
+      console.log('[Brave API] Waiting 1.2s to respect rate limit...')
+      await delay(1200)
+    }
+
+    const query = queries[i]
     const response = await braveSearch(query, resultsPerQuery)
 
     if (response.error) {
