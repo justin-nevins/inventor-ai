@@ -18,6 +18,7 @@ interface PatentResultsProps {
   findings: PatentFinding[]
   summary: string
   isNovel: boolean
+  searchFailed?: boolean  // True when API failed (completeness === 0)
   className?: string
 }
 
@@ -36,6 +37,7 @@ export function PatentResults({
   findings,
   summary,
   isNovel,
+  searchFailed,
   className,
 }: PatentResultsProps) {
   const [findingStates, setFindingStates] = useState<Record<string, FindingState>>(() => {
@@ -71,20 +73,22 @@ export function PatentResults({
             <div
               className={cn(
                 'h-10 w-10 rounded-lg flex items-center justify-center shrink-0',
-                isNovel ? 'bg-green-100' : 'bg-amber-100'
+                searchFailed ? 'bg-gray-100' : isNovel ? 'bg-green-100' : 'bg-amber-100'
               )}
             >
               <FileText
                 className={cn(
                   'h-5 w-5',
-                  isNovel ? 'text-green-600' : 'text-amber-600'
+                  searchFailed ? 'text-gray-600' : isNovel ? 'text-green-600' : 'text-amber-600'
                 )}
               />
             </div>
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
                 Patent Analysis
-                {isNovel ? (
+                {searchFailed ? (
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                ) : isNovel ? (
                   <CheckCircle className="h-4 w-4 text-green-500" />
                 ) : (
                   <AlertCircle className="h-4 w-4 text-amber-500" />
@@ -110,13 +114,23 @@ export function PatentResults({
       </CardHeader>
       <CardContent className="p-0">
         {findings.length === 0 ? (
-          <div className="p-8 text-center">
-            <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-3" />
-            <p className="text-neutral-600">No similar patents found</p>
-            <p className="text-sm text-neutral-400 mt-1">
-              This is a good sign for novelty
-            </p>
-          </div>
+          searchFailed ? (
+            <div className="p-8 text-center">
+              <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
+              <p className="text-neutral-600">Unable to complete patent search</p>
+              <p className="text-sm text-neutral-400 mt-1">
+                Please try again later or consult a patent attorney for a professional search
+              </p>
+            </div>
+          ) : (
+            <div className="p-8 text-center">
+              <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-3" />
+              <p className="text-neutral-600">No similar patents found</p>
+              <p className="text-sm text-neutral-400 mt-1">
+                This is a good sign for novelty
+              </p>
+            </div>
+          )
         ) : (
           <div className="divide-y divide-neutral-100">
             {findings.map((finding) => (

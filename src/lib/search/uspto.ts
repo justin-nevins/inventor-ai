@@ -99,10 +99,14 @@ export interface PatentReference {
   title: string
   filingDate: string
   status: string
-  source: 'USPTO_PTAB' | 'USPTO_APPEALS'
+  source: 'USPTO_PTAB' | 'USPTO_APPEALS' | 'USPTO_PATENTSVIEW'
   trialType?: string
   url: string
   relevanceContext?: string
+  // PatentsView-specific fields
+  abstract?: string
+  assignee?: string
+  isChallenged?: boolean // True if also found in PTAB
 }
 
 // IMPORTANT: Use api.uspto.gov (not data.uspto.gov which returns "use api.uspto.gov" error)
@@ -264,7 +268,24 @@ export class USPTOClient {
 }
 
 /**
- * Builds a Lucene query string for USPTO searches
+ * Escapes special Lucene characters to avoid 500 errors
+ * Characters: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+ */
+function escapeLucene(term: string): string {
+  // Remove or escape problematic characters
+  return term
+    .replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Builds a Lucene query string for USPTO PTAB searches
+ *
+ * SIMPLIFIED to avoid 500 errors:
+ * - Limits to 5 keywords max
+ * - Escapes special Lucene characters
+ * - Uses simpler query structure
  */
 export function buildUSPTOQuery(keywords: string[], options?: {
   patentNumberRange?: { from: number; to: number }
@@ -273,12 +294,23 @@ export function buildUSPTOQuery(keywords: string[], options?: {
 }): string {
   const parts: string[] = []
 
-  // Add keyword search - search in title and description fields
+  // Add keyword search - SIMPLIFIED: limit to 5 keywords, escape special chars
   if (keywords.length > 0) {
-    const keywordQuery = keywords
-      .map(k => k.includes(' ') ? `"${k}"` : k)
-      .join(' OR ')
-    parts.push(`(patentTitle:(${keywordQuery}) OR inventionTitle:(${keywordQuery}))`)
+    // Take first 5 keywords only
+    const limitedKeywords = keywords.slice(0, 5)
+
+    // Escape and clean each keyword
+    const cleanKeywords = limitedKeywords
+      .map(k => escapeLucene(k))
+      .filter(k => k.length > 2) // Remove very short terms
+      .slice(0, 5) // Re-limit after filtering
+
+    if (cleanKeywords.length > 0) {
+      // Simple query: just search in patentTitle with OR
+      // Avoid nested parentheses and complex field combinations
+      const keywordQuery = cleanKeywords.join(' OR ')
+      parts.push(`patentTitle:(${keywordQuery})`)
+    }
   }
 
   // Add patent number range if specified
@@ -518,4 +550,493 @@ export function extractPatentKeywords(
     .filter(phrase => phrase.length > 3 && phrase.split(' ').length <= 4)
 
   return [...new Set([...namePhrases, ...sortedWords])]
+}
+
+/**
+ * AI-generated patent search query structure
+ * Based on InventorAI Search Strategy: function-based queries with synonym expansion
+ */
+export interface PatentQuerySet {
+  // Core function queries (what it does)
+  functionQueries: string[]
+  // Problem/solution queries
+  problemQueries: string[]
+  // Mechanism/material queries
+  mechanismQueries: string[]
+  // Synonym-expanded variants
+  synonymQueries: string[]
+  // All queries combined for execution
+  allQueries: string[]
+}
+
+/**
+ * AI-powered patent query generation
+ * Decomposes invention into function-based queries with synonym expansion
+ *
+ * Strategy from notes:
+ * - Convert invention into "functions + constraints" (what it does, for whom, under what conditions)
+ * - Use synonym expansion ("hydration" → "fluid delivery", "refillable reservoir")
+ * - Generate variants: noun+verb, problem phrasing, mechanism/material
+ */
+export async function generatePatentSearchQueries(
+  inventionName: string,
+  description: string,
+  problemStatement?: string,
+  keyFeatures?: string[]
+): Promise<PatentQuerySet> {
+  // Import here to avoid circular dependency
+  const { createCompletion } = await import('../ai/ai-client')
+
+  const prompt = `You are a patent search specialist. Analyze this invention and generate optimized patent search queries.
+
+## Invention
+Name: ${inventionName}
+Description: ${description}
+${problemStatement ? `Problem it solves: ${problemStatement}` : ''}
+${keyFeatures?.length ? `Key features: ${keyFeatures.join(', ')}` : ''}
+
+## Your Task
+Generate search queries optimized for patent databases (USPTO, Google Patents).
+
+CRITICAL: Think in terms of FUNCTIONS and MECHANISMS, not product names.
+- "portable bidet" → "personal hygiene fluid dispenser", "handheld cleaning apparatus"
+- "smart pet feeder" → "automated animal feeding device", "programmable food dispensing system"
+
+## Output Format
+Return a JSON object with these arrays (2-3 queries each, max 10 total):
+
+{
+  "functionQueries": [
+    "queries describing what it DOES (verb + object)",
+    "e.g., 'fluid dispensing apparatus', 'automated feeding mechanism'"
+  ],
+  "problemQueries": [
+    "queries framing the PROBLEM it solves",
+    "e.g., 'portable hygiene solution', 'pet feeding automation'"
+  ],
+  "mechanismQueries": [
+    "queries about HOW it works (materials, components)",
+    "e.g., 'silicone reservoir valve assembly', 'motorized portion control'"
+  ],
+  "synonymQueries": [
+    "alternative technical terms for same concepts",
+    "e.g., 'handheld irrigation device', 'animal nutrition dispenser'"
+  ]
+}
+
+Keep queries 2-5 words. Use patent-style terminology (apparatus, device, system, method, assembly).
+Return ONLY the JSON object, no explanation.`
+
+  try {
+    const response = await createCompletion(prompt, undefined, {
+      model: 'claude-3-haiku-20240307',
+      maxTokens: 1024,
+      temperature: 0.3, // Slight creativity for synonyms
+    })
+
+    let jsonText = response.text.trim()
+    const jsonMatch = jsonText.match(/```json\n([\s\S]*?)\n```/) ||
+                      jsonText.match(/```\n([\s\S]*?)\n```/) ||
+                      jsonText.match(/\{[\s\S]*\}/)
+
+    if (jsonMatch) {
+      jsonText = jsonMatch[1] || jsonMatch[0]
+    }
+
+    const parsed = JSON.parse(jsonText) as Omit<PatentQuerySet, 'allQueries'>
+
+    // Combine all queries and deduplicate
+    const allQueries = [
+      ...(parsed.functionQueries || []),
+      ...(parsed.problemQueries || []),
+      ...(parsed.mechanismQueries || []),
+      ...(parsed.synonymQueries || []),
+    ].filter((q, i, arr) => q && arr.indexOf(q) === i)
+
+    console.log(`[USPTO] AI generated ${allQueries.length} patent search queries`)
+
+    return {
+      ...parsed,
+      allQueries: allQueries.slice(0, 10), // Cap at 10 queries
+    }
+  } catch (error) {
+    console.error('[USPTO] AI query generation failed, using fallback:', error)
+
+    // Fallback to basic keyword extraction
+    const keywords = extractPatentKeywords(inventionName, description, keyFeatures)
+    const fallbackQueries = keywords.slice(0, 6)
+
+    return {
+      functionQueries: fallbackQueries.slice(0, 2),
+      problemQueries: [],
+      mechanismQueries: [],
+      synonymQueries: [],
+      allQueries: fallbackQueries,
+    }
+  }
+}
+
+/**
+ * Execute multiple patent searches with different queries
+ * Aggregates and deduplicates results
+ */
+export async function searchUSPTOWithMultipleQueries(
+  queries: string[],
+  options?: {
+    maxResultsPerQuery?: number
+    includeProceedings?: boolean
+    includeDecisions?: boolean
+    includeAppeals?: boolean
+  }
+): Promise<{
+  patents: PatentReference[]
+  totalCount: number
+  errors: string[]
+  queriesUsed: string[]
+}> {
+  const apiKey = process.env.USPTO_API_KEY
+  if (!apiKey) {
+    return {
+      patents: [],
+      totalCount: 0,
+      errors: ['USPTO_API_KEY not configured'],
+      queriesUsed: queries,
+    }
+  }
+
+  const client = new USPTOClient(apiKey)
+  const maxResults = options?.maxResultsPerQuery || 5
+  const includeProceedings = options?.includeProceedings !== false
+  const includeDecisions = options?.includeDecisions !== false
+  const includeAppeals = options?.includeAppeals !== false
+
+  const allPatents: PatentReference[] = []
+  const errors: string[] = []
+  let totalCount = 0
+
+  // Execute searches for each query
+  for (const queryText of queries.slice(0, 6)) { // Limit to 6 queries to control API usage
+    const luceneQuery = buildUSPTOQuery([queryText])
+
+    console.log(`[USPTO] Searching: "${queryText}"`)
+
+    // Search proceedings
+    if (includeProceedings) {
+      const procResult = await client.searchProceedings({ query: luceneQuery, rows: maxResults })
+      if (procResult.status === 'error') {
+        errors.push(`Proceedings (${queryText}): ${procResult.error}`)
+      } else {
+        allPatents.push(...procResult.results.map(proceedingToPatentReference))
+        totalCount += procResult.recordTotalQuantity
+      }
+    }
+
+    // Search decisions (only for first 3 queries to save API calls)
+    if (includeDecisions && queries.indexOf(queryText) < 3) {
+      const decResult = await client.searchDecisions({ query: luceneQuery, rows: maxResults })
+      if (decResult.status === 'error') {
+        errors.push(`Decisions (${queryText}): ${decResult.error}`)
+      } else {
+        allPatents.push(...decResult.results.map(decisionToPatentReference))
+        totalCount += decResult.recordTotalQuantity
+      }
+    }
+
+    // Search appeals (only for first 2 queries)
+    if (includeAppeals && queries.indexOf(queryText) < 2) {
+      const appealResult = await client.searchAppeals({ query: luceneQuery, rows: maxResults })
+      if (appealResult.status === 'error') {
+        errors.push(`Appeals (${queryText}): ${appealResult.error}`)
+      } else {
+        allPatents.push(...appealResult.results.map(appealToPatentReference))
+        totalCount += appealResult.recordTotalQuantity
+      }
+    }
+  }
+
+  // Deduplicate by patent number
+  const seen = new Set<string>()
+  const uniquePatents = allPatents.filter(p => {
+    if (!p.patentNumber || seen.has(p.patentNumber)) return false
+    seen.add(p.patentNumber)
+    return true
+  })
+
+  console.log(`[USPTO] Found ${uniquePatents.length} unique patents from ${queries.length} queries`)
+
+  return {
+    patents: uniquePatents,
+    totalCount,
+    errors,
+    queriesUsed: queries,
+  }
+}
+
+// =============================================================================
+// PatentsView API Client
+// Searches ALL granted US patents (12M+), not just challenged patents
+// =============================================================================
+
+const PATENTSVIEW_BASE_URL = 'https://search.patentsview.org/api/v1/patent/'
+
+/**
+ * PatentsView API response structure
+ */
+export interface PatentsViewPatent {
+  patent_id: string
+  patent_title: string
+  patent_abstract: string
+  patent_date: string
+  patent_type?: string
+  patent_kind?: string
+  // Nested assignee data
+  assignees?: Array<{
+    assignee_organization?: string
+    assignee_individual_name_first?: string
+    assignee_individual_name_last?: string
+  }>
+}
+
+export interface PatentsViewSearchResult {
+  patents: PatentsViewPatent[]
+  total_patent_count: number
+  count: number
+}
+
+/**
+ * PatentsView PatentSearch API Client
+ * Searches ALL US patents (not just challenged ones)
+ *
+ * Authentication: X-Api-Key header
+ * Rate limit: 45 requests/minute
+ * Docs: https://search.patentsview.org/docs/
+ */
+export class PatentsViewClient {
+  private apiKey: string
+  private lastRequestTime = 0
+  private readonly minRequestInterval = 1334 // 45 req/min = ~1334ms between requests
+
+  constructor(apiKey?: string) {
+    const key = apiKey || process.env.PATENTSVIEW_API_KEY
+    if (!key) {
+      throw new Error('PATENTSVIEW_API_KEY required. Request at https://patentsview.org/apis/keyrequest')
+    }
+    this.apiKey = key
+  }
+
+  /**
+   * Enforces rate limiting for 45 req/min
+   */
+  private async enforceRateLimit(): Promise<void> {
+    const now = Date.now()
+    const timeSinceLastRequest = now - this.lastRequestTime
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      await new Promise(resolve =>
+        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+      )
+    }
+    this.lastRequestTime = Date.now()
+  }
+
+  /**
+   * Search patents using PatentsView API
+   * Uses _text_any operator for full-text search across title and abstract
+   */
+  async searchPatents(params: {
+    searchTerms: string[]
+    limit?: number
+  }): Promise<{ patents: PatentsViewPatent[], totalCount: number, error?: string }> {
+    await this.enforceRateLimit()
+
+    try {
+      // Build query using _text_any for text search
+      // Searches both title and abstract
+      const searchText = params.searchTerms.join(' ')
+      const query = {
+        _or: [
+          { _text_any: { patent_title: searchText } },
+          { _text_any: { patent_abstract: searchText } },
+        ]
+      }
+
+      const response = await fetch(PATENTSVIEW_BASE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': this.apiKey,
+        },
+        body: JSON.stringify({
+          q: query,
+          f: ['patent_id', 'patent_title', 'patent_abstract', 'patent_date', 'patent_type', 'patent_kind', 'assignees'],
+          o: { size: params.limit || 25 },
+          s: [{ patent_date: 'desc' }], // Most recent first
+        }),
+      })
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('PatentsView API authentication failed. Check PATENTSVIEW_API_KEY.')
+        }
+        if (response.status === 429) {
+          throw new Error('PatentsView API rate limit exceeded (45/min). Please wait.')
+        }
+        const errorBody = await response.text()
+        throw new Error(`PatentsView API error ${response.status}: ${errorBody}`)
+      }
+
+      const data = await response.json() as PatentsViewSearchResult
+
+      return {
+        patents: data.patents || [],
+        totalCount: data.total_patent_count || 0,
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[PatentsView] API request failed:', errorMessage)
+
+      return {
+        patents: [],
+        totalCount: 0,
+        error: errorMessage,
+      }
+    }
+  }
+}
+
+/**
+ * Converts PatentsView patent to standardized PatentReference format
+ */
+export function patentsViewToPatentReference(patent: PatentsViewPatent): PatentReference {
+  const assignee = patent.assignees?.[0]
+  const assigneeName = assignee?.assignee_organization ||
+    (assignee?.assignee_individual_name_first
+      ? `${assignee.assignee_individual_name_first} ${assignee.assignee_individual_name_last || ''}`
+      : undefined)
+
+  return {
+    patentNumber: patent.patent_id,
+    title: patent.patent_title || 'Title not available',
+    filingDate: patent.patent_date || '',
+    status: patent.patent_type || 'Granted',
+    source: 'USPTO_PATENTSVIEW',
+    url: getPatentUrl(patent.patent_id),
+    abstract: patent.patent_abstract,
+    assignee: assigneeName,
+    relevanceContext: assigneeName
+      ? `Granted patent - Assignee: ${assigneeName}`
+      : 'Granted patent from USPTO',
+  }
+}
+
+/**
+ * Search PatentsView with multiple queries
+ * Returns aggregated, deduplicated results
+ */
+export async function searchPatentsViewWithQueries(
+  queries: string[],
+  options?: {
+    maxResultsPerQuery?: number
+  }
+): Promise<{
+  patents: PatentReference[]
+  totalCount: number
+  errors: string[]
+  queriesUsed: string[]
+}> {
+  const apiKey = process.env.PATENTSVIEW_API_KEY
+  if (!apiKey) {
+    return {
+      patents: [],
+      totalCount: 0,
+      errors: ['PATENTSVIEW_API_KEY not configured. Request at https://patentsview.org/apis/keyrequest'],
+      queriesUsed: queries,
+    }
+  }
+
+  const client = new PatentsViewClient(apiKey)
+  const maxResults = options?.maxResultsPerQuery || 10
+  const allPatents: PatentReference[] = []
+  const errors: string[] = []
+  let totalCount = 0
+
+  // Execute searches for each query (limit to 5 to respect rate limits)
+  for (const queryText of queries.slice(0, 5)) {
+    console.log(`[PatentsView] Searching: "${queryText}"`)
+
+    const result = await client.searchPatents({
+      searchTerms: queryText.split(' '),
+      limit: maxResults,
+    })
+
+    if (result.error) {
+      errors.push(`PatentsView (${queryText}): ${result.error}`)
+    } else {
+      allPatents.push(...result.patents.map(patentsViewToPatentReference))
+      totalCount += result.totalCount
+    }
+  }
+
+  // Deduplicate by patent number
+  const seen = new Set<string>()
+  const uniquePatents = allPatents.filter(p => {
+    if (!p.patentNumber || seen.has(p.patentNumber)) return false
+    seen.add(p.patentNumber)
+    return true
+  })
+
+  console.log(`[PatentsView] Found ${uniquePatents.length} unique patents from ${queries.length} queries`)
+
+  return {
+    patents: uniquePatents,
+    totalCount,
+    errors,
+    queriesUsed: queries,
+  }
+}
+
+/**
+ * Merges results from PatentsView and PTAB
+ * Marks patents as "challenged" if they appear in PTAB
+ */
+export function mergePatentResults(
+  patentsViewResults: PatentReference[],
+  ptabResults: PatentReference[]
+): PatentReference[] {
+  // Create a set of patent numbers that have been challenged (appear in PTAB)
+  const challengedPatents = new Set(
+    ptabResults.map(p => p.patentNumber.replace(/[\s-]/g, '').toUpperCase())
+  )
+
+  // Mark PatentsView results as challenged if they appear in PTAB
+  const mergedPatentsView = patentsViewResults.map(p => ({
+    ...p,
+    isChallenged: challengedPatents.has(p.patentNumber.replace(/[\s-]/g, '').toUpperCase()),
+  }))
+
+  // Deduplicate - prefer PatentsView data (has abstract) but mark as challenged
+  const seen = new Set<string>()
+  const merged: PatentReference[] = []
+
+  // Add PatentsView results first (they have abstracts)
+  for (const patent of mergedPatentsView) {
+    const normalized = patent.patentNumber.replace(/[\s-]/g, '').toUpperCase()
+    if (!seen.has(normalized)) {
+      seen.add(normalized)
+      merged.push(patent)
+    }
+  }
+
+  // Add PTAB results that weren't in PatentsView
+  for (const patent of ptabResults) {
+    const normalized = patent.patentNumber.replace(/[\s-]/g, '').toUpperCase()
+    if (!seen.has(normalized)) {
+      seen.add(normalized)
+      merged.push({
+        ...patent,
+        isChallenged: true, // All PTAB results are challenged by definition
+      })
+    }
+  }
+
+  return merged
 }

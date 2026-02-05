@@ -1,5 +1,7 @@
 // AI Agent Types and Interfaces
 
+export type RiskLevel = 'high_risk' | 'moderate_risk' | 'low_risk' | 'incomplete'
+
 export interface GraduatedTruthScores {
   objective_truth: number // 0-1: How verifiable/factual
   practical_truth: number // 0-1: How actionable/useful
@@ -36,7 +38,8 @@ export interface NoveltyCheckRequest {
 }
 
 export interface NoveltyCheckResponse {
-  overall_novelty_score: number // 0-1: 1 = highly novel, 0 = already exists
+  overall_novelty_score: number // 0-1: 1 = highly novel, 0 = already exists (kept for backwards compat)
+  risk_level: RiskLevel // Clear decision state: high_risk, moderate_risk, low_risk, incomplete
   web_search_result: NoveltyResult
   retail_search_result: NoveltyResult
   patent_search_result: NoveltyResult

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { runWebSearchAgent } from '@/lib/ai/web-search-agent'
 import { runRetailSearchAgent } from '@/lib/ai/retail-search-agent'
 import { runPatentSearchAgent } from '@/lib/ai/patent-search-agent'
-import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores } from '@/lib/ai/types'
+import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores, RiskLevel, NoveltyFinding } from '@/lib/ai/types'
 import type { AiMemoryInsert, Json } from '@/types/database'
 
 export async function POST(request: Request) {
@@ -41,13 +41,58 @@ export async function POST(request: Request) {
       runPatentSearchAgent(noveltyRequest),
     ])
 
-    // Calculate overall novelty score (weighted average)
-    // Web: 30%, Retail: 30%, Patent: 40% (patents are most important)
-    const webScore = webResult.is_novel ? 1 : (1 - Math.max(...webResult.findings.map(f => f.similarity_score), 0))
-    const retailScore = retailResult.is_novel ? 1 : (1 - Math.max(...retailResult.findings.map(f => f.similarity_score), 0))
-    const patentScore = patentResult.is_novel ? 1 : (1 - Math.max(...patentResult.findings.map(f => f.similarity_score), 0))
+    // Detect failed agents (completeness === 0 means API failed)
+    const webFailed = webResult.truth_scores.completeness === 0
+    const retailFailed = retailResult.truth_scores.completeness === 0
+    const patentFailed = patentResult.truth_scores.completeness === 0
+    const anyAgentFailed = webFailed || retailFailed || patentFailed
 
+    // Calculate scores - use 0.5 (unknown) for failed agents instead of calculating from empty findings
+    // This prevents failed APIs from artificially inflating novelty scores
+    const webScore = webFailed ? 0.5 :
+      (webResult.is_novel ? 1 : (1 - Math.max(...webResult.findings.map(f => f.similarity_score), 0)))
+    const retailScore = retailFailed ? 0.5 :
+      (retailResult.is_novel ? 1 : (1 - Math.max(...retailResult.findings.map(f => f.similarity_score), 0)))
+    const patentScore = patentFailed ? 0.5 :
+      (patentResult.is_novel ? 1 : (1 - Math.max(...patentResult.findings.map(f => f.similarity_score), 0)))
+
+    // Weighted average: Web 30%, Retail 30%, Patent 40%
     const overall_novelty_score = (webScore * 0.3) + (retailScore * 0.3) + (patentScore * 0.4)
+
+    // Gather all findings for risk assessment
+    const allFindings: NoveltyFinding[] = [
+      ...webResult.findings,
+      ...retailResult.findings,
+      ...patentResult.findings,
+    ]
+    const maxSimilarity = allFindings.length > 0
+      ? Math.max(...allFindings.map(f => f.similarity_score))
+      : 0
+    const hasHighConflict = maxSimilarity >= 0.8
+
+    // Determine risk level based on findings and failures
+    // PRIORITY: High-conflict findings override incomplete status!
+    // If we found an existing matching product, that's the critical info - even if some APIs failed
+    let risk_level: RiskLevel
+    if (hasHighConflict) {
+      // Found near-exact matches - this is the most important signal
+      risk_level = 'high_risk'
+    } else if (anyAgentFailed && allFindings.length === 0) {
+      // Agents failed AND no findings at all - we don't know anything
+      risk_level = 'incomplete'
+    } else if (anyAgentFailed) {
+      // Some agents failed but we have SOME data - show what we found
+      // If we found moderate matches, still show that risk
+      if (maxSimilarity >= 0.5) {
+        risk_level = 'moderate_risk'
+      } else {
+        risk_level = 'incomplete'
+      }
+    } else if (maxSimilarity >= 0.5) {
+      risk_level = 'moderate_risk'
+    } else {
+      risk_level = 'low_risk'
+    }
 
     // Calculate overall truth scores (average of all agents)
     const avgTruthScores: GraduatedTruthScores = {
@@ -73,38 +118,49 @@ export async function POST(request: Request) {
       ) / 3,
     }
 
-    // Generate recommendation based on novelty score
+    // Generate recommendation based on RISK LEVEL (not just score)
+    // This ensures high-conflict findings override high novelty scores
     let recommendation = ''
     let next_steps: string[] = []
 
-    if (overall_novelty_score >= 0.7) {
-      recommendation = 'This invention appears highly novel! No strong prior art or existing products found.'
+    if (risk_level === 'high_risk') {
+      // High risk takes priority - we found matching products/patents
+      const partialNote = anyAgentFailed ? ' (Note: Some searches failed - more matches may exist)' : ''
+      recommendation = `Very similar products or patents found. Your invention may already exist in some form.${partialNote}`
+      next_steps = [
+        'Review the high-conflict findings below carefully',
+        'Identify what makes your approach different',
+        'Consider design-around strategies or pivoting',
+        'Consult with a patent attorney before investing further',
+      ]
+    } else if (risk_level === 'incomplete') {
+      recommendation = 'Search incomplete due to API issues. Results may not be reliable. Please try again or consult a professional.'
+      next_steps = [
+        'Try running the novelty check again',
+        'Consult a patent attorney for a professional prior art search',
+        'Review partial results below for initial insights',
+      ]
+    } else if (risk_level === 'moderate_risk') {
+      recommendation = 'Adjacent products found. Your differentiators may be meaningful, but competition exists.'
+      next_steps = [
+        'Analyze similar products to find differentiation angles',
+        'Refine your unique value proposition',
+        'Consider design-around strategies for existing patents',
+        'Consult with patent attorney about patentability',
+      ]
+    } else {
+      recommendation = 'No obvious matches found. Consider a professional search before significant investment.'
       next_steps = [
         'Consider filing a provisional patent application',
         'Conduct professional prior art search with patent attorney',
         'Start prototyping and testing with target users',
         'Validate market demand through MVP',
       ]
-    } else if (overall_novelty_score >= 0.4) {
-      recommendation = 'This invention has moderate novelty. Some similar solutions exist, but there may be opportunities for differentiation.'
-      next_steps = [
-        'Analyze competitive products to find differentiation angles',
-        'Refine unique value proposition',
-        'Consider design-around strategies for existing patents',
-        'Consult with patent attorney about patentability',
-      ]
-    } else {
-      recommendation = 'Similar products and/or patents already exist. Consider pivoting or finding a unique angle.'
-      next_steps = [
-        'Review competitive products to identify gaps',
-        'Consider alternative approaches to the same problem',
-        'Look for underserved niches or use cases',
-        'Evaluate whether to pursue or pivot to a different idea',
-      ]
     }
 
     const response: NoveltyCheckResponse = {
       overall_novelty_score,
+      risk_level,
       web_search_result: webResult,
       retail_search_result: retailResult,
       patent_search_result: patentResult,

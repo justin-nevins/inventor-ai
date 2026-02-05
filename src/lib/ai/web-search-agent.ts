@@ -1,19 +1,15 @@
-// Web Search Agent - Checks for existing products via Brave Search API
+// Web Search Agent - Checks for existing products via Tavily Search API
 // Two-Phase Approach:
-// Phase 1: Call Brave Search API to get REAL search results
-// Phase 2: Pass real results to Claude for novelty analysis
+// Phase 1: Call Tavily Search API to get REAL search results
+// Phase 2: Pass real results to AI (Anthropic with OpenAI fallback) for novelty analysis
 
-import Anthropic from '@anthropic-ai/sdk'
 import type { NoveltyResult, NoveltyCheckRequest, NoveltyFinding, GraduatedTruthScores } from './types'
 import {
   generateNoveltySearchQueries,
   runMultipleSearches,
-  type BraveSearchResult,
-} from '../search/brave'
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+  type TavilySearchResult,
+} from '../search/tavily'
+import { createCompletion } from './ai-client'
 
 const NOVELTY_ANALYSIS_PROMPT = {
   role: `You are a market research specialist focused on product novelty assessment. You analyze real web search results to determine if similar products already exist.`,
@@ -143,11 +139,12 @@ export async function runWebSearchAgent(
       return {
         title: result.title,
         description: result.description,
-        url: result.url, // REAL URL from Brave Search
+        url: result.url, // REAL URL from Tavily Search
         similarity_score: analysis?.similarity_score ?? 0.3,
-        source: 'Brave Search',
+        source: 'Tavily Search',
         metadata: {
           relevance_explanation: analysis?.relevance_explanation,
+          relevance_score: result.score, // Tavily relevance score
           age: result.age,
         },
       }
@@ -193,7 +190,7 @@ export async function runWebSearchAgent(
  */
 async function analyzeSearchResults(
   request: NoveltyCheckRequest,
-  searchResults: BraveSearchResult[],
+  searchResults: TavilySearchResult[],
   queriesUsed: string[]
 ): Promise<ClaudeAnalysisResult> {
   // Format search results for Claude
@@ -232,19 +229,16 @@ ${NOVELTY_ANALYSIS_PROMPT.output}
 
 CRITICAL: Base your analysis ONLY on the search results provided above. Do not invent or imagine products that aren't in the results. Be honest about what the results do and don't tell us.`
 
-  const response = await anthropic.messages.create({
+  // Use AI client with automatic Anthropic → OpenAI fallback
+  const response = await createCompletion(prompt, undefined, {
     model: 'claude-3-haiku-20240307',
-    max_tokens: 2048,
-    messages: [{ role: 'user', content: prompt }],
+    maxTokens: 2048,
   })
 
-  const content = response.content[0]
-  if (content.type !== 'text') {
-    throw new Error('Unexpected response type from Claude')
-  }
+  console.log(`[Web Search Agent] Analysis completed via ${response.provider} (${response.model})`)
 
   // Extract JSON from response
-  let jsonText = content.text.trim()
+  let jsonText = response.text.trim()
   const jsonMatch =
     jsonText.match(/```json\n([\s\S]*?)\n```/) ||
     jsonText.match(/```\n([\s\S]*?)\n```/)

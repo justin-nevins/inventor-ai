@@ -1,23 +1,26 @@
-// Patent Search Agent - Two-Phase Approach
-// Phase 1: Fetch REAL patent data from USPTO PTAB API
-// Phase 2: Pass real data to Claude for novelty analysis
+// Patent Search Agent - Hybrid Approach
+// Phase 1: Fetch REAL patent data from PatentsView (all patents) + PTAB (challenged patents)
+// Phase 2: Pass real data to AI (Anthropic with OpenAI fallback) for novelty analysis
+//
+// PatentsView: 12M+ granted US patents (comprehensive coverage)
+// PTAB: Challenged patents, IPR/PGR/CBM trials, appeals (marks high-risk areas)
 
-import Anthropic from '@anthropic-ai/sdk'
 import type { NoveltyResult, NoveltyCheckRequest, NoveltyFinding } from './types'
 import {
-  searchUSPTOComprehensive,
-  extractPatentKeywords,
+  searchUSPTOWithMultipleQueries,
+  searchPatentsViewWithQueries,
+  mergePatentResults,
+  generatePatentSearchQueries,
   type PatentReference,
+  type PatentQuerySet,
 } from '../search/uspto'
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+import { withRetry } from '../search/retry'
+import { createCompletion } from './ai-client'
 
 const PATENT_ANALYSIS_PROMPT = {
-  role: `You are a patent research specialist with expertise in prior art analysis and novelty assessment. You analyze REAL patent data from USPTO searches to assess patentability.`,
+  role: `You are a patent research specialist with expertise in prior art analysis and novelty assessment. You analyze REAL patent data from USPTO databases to assess patentability.`,
 
-  task: `Analyze the provided invention against REAL patent search results from the USPTO PTAB database. Assess similarity, potential conflicts, and overall novelty.`,
+  task: `Analyze the provided invention against REAL patent search results from USPTO databases (PatentsView for all granted patents + PTAB for challenged patents). Assess similarity, potential conflicts, and overall novelty.`,
 
   howTo: `
 1. Review the invention details carefully
@@ -27,6 +30,7 @@ const PATENT_ANALYSIS_PROMPT = {
    - Does it cover the same problem space?
    - Would its claims potentially cover this invention?
    - Is it expired, active, or pending?
+   - If marked as "challenged" (from PTAB), note this increases risk
 4. Identify the most threatening prior art
 5. Consider if there are gaps that make the invention patentable
 6. Assess overall novelty based on the REAL patent data provided
@@ -80,57 +84,162 @@ function patentReferenceToFinding(
   patent: PatentReference,
   analysis?: PatentAnalysis
 ): NoveltyFinding {
+  // Determine source display name
+  let sourceName = 'USPTO PTAB'
+  if (patent.source === 'USPTO_PATENTSVIEW') {
+    sourceName = patent.isChallenged ? 'USPTO (Challenged)' : 'USPTO Patents'
+  } else if (patent.source === 'USPTO_APPEALS') {
+    sourceName = 'USPTO Appeals'
+  }
+
+  // Build description from analysis or available data
+  let description = analysis?.analysis || patent.relevanceContext || ''
+  if (!description && patent.abstract) {
+    description = patent.abstract.length > 200
+      ? patent.abstract.slice(0, 200) + '...'
+      : patent.abstract
+  }
+  if (!description) {
+    description = patent.source === 'USPTO_PATENTSVIEW'
+      ? 'Granted patent from USPTO database'
+      : 'Patent found in USPTO PTAB database'
+  }
+
   return {
     title: `${patent.title} (${patent.patentNumber})`,
-    description: analysis?.analysis || patent.relevanceContext || 'Patent found in USPTO PTAB database',
+    description,
     url: patent.url,
     similarity_score: analysis?.similarity_score ?? 0.5,
-    source: patent.source === 'USPTO_APPEALS' ? 'USPTO Appeals' : 'USPTO PTAB',
+    source: sourceName,
     metadata: {
       patent_number: patent.patentNumber,
       filing_date: patent.filingDate,
       status: patent.status,
       trial_type: patent.trialType,
       threat_level: analysis?.threat_level,
+      assignee: patent.assignee,
+      is_challenged: patent.isChallenged,
     },
   }
 }
 
 /**
- * Phase 1: Fetch real patent data from USPTO PTAB API
+ * Phase 1: Fetch real patent data from PatentsView + PTAB
+ * PatentsView = PRIMARY (all 12M+ granted patents)
+ * PTAB = SUPPLEMENTARY (marks challenged patents, useful for risk assessment)
+ *
+ * Uses AI-powered query decomposition for better search coverage
  */
-async function fetchUSPTOPatents(request: NoveltyCheckRequest): Promise<{
+async function fetchPatents(request: NoveltyCheckRequest): Promise<{
   patents: PatentReference[]
-  keywords: string[]
+  querySet: PatentQuerySet
   errors: string[]
+  hasPatentsViewData: boolean
+  hasPTABData: boolean
 }> {
-  // Extract relevant keywords for patent search
-  const keywords = extractPatentKeywords(
+  // Generate AI-powered function-based queries
+  console.log('[Patent Search] Generating AI-powered patent search queries...')
+
+  const querySet = await generatePatentSearchQueries(
     request.invention_name,
     request.description,
+    request.problem_statement,
     request.key_features
   )
 
-  console.log('[Patent Search] Searching USPTO with keywords:', keywords.slice(0, 5))
+  console.log('[Patent Search] Query types generated:')
+  console.log(`  - Function queries: ${querySet.functionQueries.length}`)
+  console.log(`  - Problem queries: ${querySet.problemQueries.length}`)
+  console.log(`  - Mechanism queries: ${querySet.mechanismQueries.length}`)
+  console.log(`  - Synonym queries: ${querySet.synonymQueries.length}`)
+  console.log(`  - Total queries: ${querySet.allQueries.length}`)
 
-  // Search USPTO PTAB API
-  const searchResult = await searchUSPTOComprehensive(keywords, {
-    maxResultsPerEndpoint: 15,
-    includeProceedings: true,
-    includeDecisions: true,
-    includeAppeals: true,
-  })
+  const allErrors: string[] = []
+  let patentsViewPatents: PatentReference[] = []
+  let ptabPatents: PatentReference[] = []
+  let hasPatentsViewData = false
+  let hasPTABData = false
 
-  if (searchResult.errors.length > 0) {
-    console.warn('[Patent Search] USPTO API warnings:', searchResult.errors)
+  // Search both APIs in parallel with retry
+  const [patentsViewResult, ptabResult] = await Promise.all([
+    // PatentsView (PRIMARY) - all granted patents
+    withRetry(async () => {
+      const result = await searchPatentsViewWithQueries(querySet.allQueries, {
+        maxResultsPerQuery: 10,
+      })
+      if (result.errors.some(e => e.includes('PATENTSVIEW_API_KEY'))) {
+        // Not configured - not a retryable error
+        throw new Error(result.errors[0])
+      }
+      if (result.errors.length > 0 && result.patents.length === 0) {
+        // API errors but no data - might be retryable
+        throw new Error(result.errors[0])
+      }
+      return result
+    }, { maxAttempts: 2, initialDelayMs: 1500 }),
+
+    // PTAB (SUPPLEMENTARY) - challenged patents
+    withRetry(async () => {
+      const result = await searchUSPTOWithMultipleQueries(querySet.allQueries, {
+        maxResultsPerQuery: 5,
+        includeProceedings: true,
+        includeDecisions: true,
+        includeAppeals: true,
+      })
+      if (result.errors.some(e => e.includes('USPTO_API_KEY'))) {
+        // Not configured - not a retryable error
+        throw new Error(result.errors[0])
+      }
+      if (result.errors.length > 0 && result.patents.length === 0) {
+        // API errors but no data - might be retryable
+        throw new Error(result.errors[0])
+      }
+      return result
+    }, { maxAttempts: 2, initialDelayMs: 1500 }),
+  ])
+
+  // Process PatentsView results
+  if (patentsViewResult.success && patentsViewResult.data) {
+    patentsViewPatents = patentsViewResult.data.patents
+    hasPatentsViewData = patentsViewPatents.length > 0
+    allErrors.push(...patentsViewResult.data.errors)
+    console.log(`[Patent Search] PatentsView: ${patentsViewPatents.length} patents found`)
+  } else {
+    const errMsg = patentsViewResult.lastError?.message || 'PatentsView search failed'
+    // Only add as error if it's not just "key not configured"
+    if (!errMsg.includes('PATENTSVIEW_API_KEY')) {
+      allErrors.push(`PatentsView: ${errMsg}`)
+    } else {
+      console.log('[Patent Search] PatentsView: API key not configured (using PTAB only)')
+    }
   }
 
-  console.log(`[Patent Search] Found ${searchResult.patents.length} patents (total in database: ${searchResult.totalCount})`)
+  // Process PTAB results
+  if (ptabResult.success && ptabResult.data) {
+    ptabPatents = ptabResult.data.patents
+    hasPTABData = ptabPatents.length > 0
+    allErrors.push(...ptabResult.data.errors)
+    console.log(`[Patent Search] PTAB: ${ptabPatents.length} challenged patents found`)
+  } else {
+    const errMsg = ptabResult.lastError?.message || 'PTAB search failed'
+    if (!errMsg.includes('USPTO_API_KEY')) {
+      allErrors.push(`PTAB: ${errMsg}`)
+    } else {
+      console.log('[Patent Search] PTAB: API key not configured')
+    }
+  }
+
+  // Merge results (PatentsView data preferred, PTAB marks challenged patents)
+  const mergedPatents = mergePatentResults(patentsViewPatents, ptabPatents)
+
+  console.log(`[Patent Search] Combined: ${mergedPatents.length} unique patents`)
 
   return {
-    patents: searchResult.patents,
-    keywords,
-    errors: searchResult.errors,
+    patents: mergedPatents,
+    querySet,
+    errors: allErrors,
+    hasPatentsViewData,
+    hasPTABData,
   }
 }
 
@@ -140,7 +249,7 @@ async function fetchUSPTOPatents(request: NoveltyCheckRequest): Promise<{
 async function analyzePatentsWithClaude(
   request: NoveltyCheckRequest,
   patents: PatentReference[],
-  keywords: string[]
+  querySet: PatentQuerySet
 ): Promise<AnalysisResult> {
   // Format patent data for Claude
   const patentSummaries = patents.map((p, i) => `
@@ -153,6 +262,13 @@ ${i + 1}. Patent: ${p.patentNumber}
    Context: ${p.relevanceContext || 'N/A'}
    URL: ${p.url}
 `).join('\n')
+
+  // Format query strategy for transparency
+  const queryStrategy = `
+**Function-based queries** (what it does): ${querySet.functionQueries.join(', ') || 'none'}
+**Problem-based queries** (what it solves): ${querySet.problemQueries.join(', ') || 'none'}
+**Mechanism queries** (how it works): ${querySet.mechanismQueries.join(', ') || 'none'}
+**Synonym queries** (alternative terms): ${querySet.synonymQueries.join(', ') || 'none'}`
 
   const prompt = `${PATENT_ANALYSIS_PROMPT.role}
 
@@ -168,34 +284,34 @@ ${PATENT_ANALYSIS_PROMPT.howTo}
 - **Target Audience**: ${request.target_audience || 'Not provided'}
 - **Key Features**: ${request.key_features?.join(', ') || 'Not provided'}
 
-## Search Keywords Used:
-${keywords.join(', ')}
+## Search Strategy Used:
+We searched USPTO databases using AI-generated function-based queries:
+${queryStrategy}
 
-## REAL USPTO PTAB Patent Search Results (${patents.length} patents found):
+## REAL USPTO Patent Search Results (${patents.length} patents found):
 ${patents.length > 0 ? patentSummaries : 'No patents found matching the search criteria.'}
 
 ${PATENT_ANALYSIS_PROMPT.output}
 
 CRITICAL:
 - Analyze ONLY the real patents provided above - do not invent or simulate any patents
-- If no patents were found, assess novelty based on that fact but note limited search coverage
+- Patents from "USPTO_PATENTSVIEW" are from the comprehensive granted patents database
+- Patents from "USPTO_PTAB" or "USPTO_APPEALS" are challenged patents - these indicate contested technology areas
+- Patents marked with isChallenged=true have been involved in patent disputes
+- If no patents were found, assess novelty based on that fact
 - Be conservative in novelty assessment
-- Note that PTAB data includes challenged patents and appeals, which may indicate contested areas
-- Always recommend professional patent search for comprehensive coverage`
+- Consider if the search queries adequately covered the invention's key functions
+- Recommend professional patent search before filing`
 
-  const response = await anthropic.messages.create({
+  const response = await createCompletion(prompt, undefined, {
     model: 'claude-3-haiku-20240307',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: prompt }],
+    maxTokens: 4096,
   })
 
-  const content = response.content[0]
-  if (content.type !== 'text') {
-    throw new Error('Unexpected response type from Claude')
-  }
+  console.log(`[Patent Search Agent] Analysis via ${response.provider} (${response.model})`)
 
   // Extract JSON from response
-  let jsonText = content.text.trim()
+  let jsonText = response.text.trim()
   const jsonMatch = jsonText.match(/```json\n([\s\S]*?)\n```/) ||
                     jsonText.match(/```\n([\s\S]*?)\n```/)
 
@@ -207,39 +323,64 @@ CRITICAL:
 }
 
 /**
- * Main patent search function - Two-phase approach
- * 1. Fetches REAL data from USPTO PTAB API
+ * Main patent search function - Hybrid approach
+ * 1. Fetches REAL data from PatentsView (all patents) + PTAB (challenged patents)
  * 2. Analyzes real data with Claude
  */
 export async function runPatentSearchAgent(
   request: NoveltyCheckRequest
 ): Promise<NoveltyResult> {
   try {
-    // Phase 1: Fetch real USPTO data
-    const { patents, keywords, errors } = await fetchUSPTOPatents(request)
+    // Phase 1: Fetch patents from PatentsView (primary) + PTAB (supplementary)
+    const { patents, querySet, errors, hasPatentsViewData, hasPTABData } = await fetchPatents(request)
 
-    // Check if we have API access
-    const apiKeyMissing = errors.some(e => e.includes('USPTO_API_KEY'))
-    if (apiKeyMissing) {
+    // Check if we have NO API access at all (both keys missing)
+    const patentsViewKeyMissing = errors.some(e => e.includes('PATENTSVIEW_API_KEY'))
+    const ptabKeyMissing = errors.some(e => e.includes('USPTO_API_KEY'))
+
+    if (patentsViewKeyMissing && ptabKeyMissing) {
       return {
         agent_type: 'patent_search',
         is_novel: false,
         confidence: 0,
         findings: [],
-        summary: 'USPTO API key not configured. Please add USPTO_API_KEY to your environment variables to enable real patent searches.',
+        summary: 'No patent API keys configured. Please add PATENTSVIEW_API_KEY and/or USPTO_API_KEY to your environment variables.',
         truth_scores: {
           objective_truth: 0,
           practical_truth: 0,
           completeness: 0,
           contextual_scope: 0,
         },
-        search_query_used: keywords.join(', '),
+        search_query_used: querySet.allQueries.join('; '),
+        timestamp: new Date(),
+      }
+    }
+
+    // Check for server errors
+    const serverErrors = errors.filter(e => e.includes('500') || e.includes('Internal Server Error'))
+
+    // If we found no patents AND had server errors from ALL configured APIs, we can't trust the results
+    const allApisErrored = !hasPatentsViewData && !hasPTABData && serverErrors.length > 0
+    if (allApisErrored) {
+      return {
+        agent_type: 'patent_search',
+        is_novel: false,
+        confidence: 0,
+        findings: [],
+        summary: `Patent APIs are experiencing server issues (${serverErrors.length} requests failed). Unable to complete patent search. Please try again later or consult a patent attorney.`,
+        truth_scores: {
+          objective_truth: 0,
+          practical_truth: 0.2,
+          completeness: 0,
+          contextual_scope: 0,
+        },
+        search_query_used: querySet.allQueries.join('; '),
         timestamp: new Date(),
       }
     }
 
     // Phase 2: Analyze with Claude
-    const analysis = await analyzePatentsWithClaude(request, patents, keywords)
+    const analysis = await analyzePatentsWithClaude(request, patents, querySet)
 
     // Build findings from real patent data + Claude's analysis
     const findings: NoveltyFinding[] = patents.map(patent => {
@@ -252,23 +393,37 @@ export async function runPatentSearchAgent(
     // Sort findings by similarity score (most similar first)
     findings.sort((a, b) => b.similarity_score - a.similarity_score)
 
-    // Calculate truth scores based on real data
-    const dataCompleteness = patents.length > 0 ? Math.min(1, patents.length / 20) : 0.1
-    const hasRealData = patents.length > 0
+    // Calculate truth scores based on data sources
+    // PatentsView = comprehensive (95%), PTAB-only = limited (25%)
+    const queryDiversity = (
+      (querySet.functionQueries.length > 0 ? 0.25 : 0) +
+      (querySet.problemQueries.length > 0 ? 0.25 : 0) +
+      (querySet.mechanismQueries.length > 0 ? 0.25 : 0) +
+      (querySet.synonymQueries.length > 0 ? 0.25 : 0)
+    )
+
+    // Error penalty (reduce scores if APIs had partial failures)
+    const errorRate = errors.length / Math.max(querySet.allQueries.length * 2, 1)
+    const errorPenalty = errorRate > 0 ? (1 - errorRate * 0.3) : 1
+
+    // Truth scores based on data source quality
+    // PatentsView success = high scores (covers 95% of patents)
+    // PTAB-only = low scores (covers <5% of patents)
+    const truthScores = {
+      objective_truth: hasPatentsViewData ? 0.95 * errorPenalty : (hasPTABData ? 0.6 * errorPenalty : 0),
+      practical_truth: hasPatentsViewData ? 0.9 * errorPenalty : (hasPTABData ? 0.5 * errorPenalty : 0),
+      completeness: hasPatentsViewData ? 0.85 * errorPenalty : (hasPTABData ? 0.25 * errorPenalty : 0),
+      contextual_scope: hasPatentsViewData ? 0.9 * queryDiversity * errorPenalty : (hasPTABData ? 0.4 * queryDiversity * errorPenalty : 0),
+    }
 
     return {
       agent_type: 'patent_search',
       is_novel: analysis.is_novel,
-      confidence: analysis.confidence,
+      confidence: analysis.confidence * errorPenalty,
       findings: findings.slice(0, 10), // Top 10 most relevant
-      summary: buildSummary(analysis, patents.length, errors),
-      truth_scores: {
-        objective_truth: hasRealData ? 0.9 : 0.3, // High if using real data
-        practical_truth: hasRealData ? 0.8 : 0.4,
-        completeness: dataCompleteness * 0.7, // PTAB is subset of all patents
-        contextual_scope: hasRealData ? 0.85 : 0.3,
-      },
-      search_query_used: keywords.join(', '),
+      summary: buildSummary(analysis, patents.length, errors, querySet, hasPatentsViewData, hasPTABData),
+      truth_scores: truthScores,
+      search_query_used: querySet.allQueries.join('; '),
       timestamp: new Date(),
     }
   } catch (error) {
@@ -296,7 +451,14 @@ export async function runPatentSearchAgent(
 /**
  * Builds a comprehensive summary from the analysis
  */
-function buildSummary(analysis: AnalysisResult, patentCount: number, errors: string[]): string {
+function buildSummary(
+  analysis: AnalysisResult,
+  patentCount: number,
+  errors: string[],
+  querySet?: PatentQuerySet,
+  hasPatentsViewData?: boolean,
+  hasPTABData?: boolean
+): string {
   const parts: string[] = []
 
   // Main summary from Claude's analysis
@@ -304,9 +466,26 @@ function buildSummary(analysis: AnalysisResult, patentCount: number, errors: str
 
   // Add data source context
   if (patentCount > 0) {
-    parts.push(`\n\nBased on ${patentCount} real patents from USPTO PTAB database.`)
+    const sources: string[] = []
+    if (hasPatentsViewData) sources.push('USPTO PatentsView (all granted patents)')
+    if (hasPTABData) sources.push('USPTO PTAB (challenged patents)')
+    parts.push(`\n\nBased on ${patentCount} real patents from ${sources.join(' + ')}.`)
+  } else if (hasPatentsViewData) {
+    parts.push('\n\nNo matching patents found in USPTO database (comprehensive search completed).')
+  } else if (hasPTABData) {
+    parts.push('\n\nNo matching patents found in USPTO PTAB (challenged patents only - limited coverage).')
   } else {
-    parts.push('\n\nNo matching patents found in USPTO PTAB database.')
+    parts.push('\n\nNo patent data retrieved.')
+  }
+
+  // Add search strategy info
+  if (querySet && querySet.allQueries.length > 0) {
+    const queryTypes = []
+    if (querySet.functionQueries.length > 0) queryTypes.push('function-based')
+    if (querySet.problemQueries.length > 0) queryTypes.push('problem-based')
+    if (querySet.mechanismQueries.length > 0) queryTypes.push('mechanism')
+    if (querySet.synonymQueries.length > 0) queryTypes.push('synonym-expanded')
+    parts.push(`\n\nSearch strategy: ${querySet.allQueries.length} AI-generated queries (${queryTypes.join(', ')}).`)
   }
 
   // Add patentability assessment
@@ -326,11 +505,19 @@ function buildSummary(analysis: AnalysisResult, patentCount: number, errors: str
 
   // Add any warnings
   if (errors.length > 0) {
-    parts.push(`\n\nSearch warnings: ${errors.join('; ')}`)
+    // Filter out "key not configured" errors from display
+    const displayErrors = errors.filter(e => !e.includes('API_KEY'))
+    if (displayErrors.length > 0) {
+      parts.push(`\n\nSearch warnings: ${displayErrors.join('; ')}`)
+    }
   }
 
-  // Always add disclaimer
-  parts.push('\n\nIMPORTANT: This search covers USPTO PTAB (challenged patents, IPR/PGR/CBM trials, and appeals) which is a subset of all patents. A comprehensive patent search by a qualified patent attorney is recommended before filing.')
+  // Add coverage disclaimer based on data sources
+  if (hasPatentsViewData) {
+    parts.push('\n\nNOTE: This search covers granted US patents via PatentsView. A professional patent search is still recommended before filing.')
+  } else if (hasPTABData) {
+    parts.push('\n\nIMPORTANT: This search only covers USPTO PTAB (challenged patents, <5% of all patents). For comprehensive coverage, configure PATENTSVIEW_API_KEY or consult a patent attorney.')
+  }
 
   return parts.join('')
 }

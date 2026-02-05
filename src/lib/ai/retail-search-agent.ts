@@ -1,8 +1,7 @@
 // Retail Search Agent - Uses real eBay API data for novelty checking
-// Phase 1: Fetch real products from eBay Browse API (or Brave Search fallback)
-// Phase 2: Pass real data to Claude for novelty analysis
+// Phase 1: Fetch real products from eBay Browse API
+// Phase 2: Pass real data to AI (Anthropic with OpenAI fallback) for novelty analysis
 
-import Anthropic from '@anthropic-ai/sdk'
 import type { NoveltyResult, NoveltyCheckRequest, NoveltyFinding, GraduatedTruthScores } from './types'
 import {
   searchSimilarProducts,
@@ -11,12 +10,9 @@ import {
 } from '../search/ebay'
 import {
   runMultipleSearches,
-  type BraveSearchResult,
-} from '../search/brave'
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+  type TavilySearchResult,
+} from '../search/tavily'
+import { createCompletion } from './ai-client'
 
 /**
  * Convert eBay product to NoveltyFinding format
@@ -123,7 +119,7 @@ function generateProductSearchQueries(
 /**
  * Convert Brave search result to NoveltyFinding format for retail context
  */
-function braveResultToRetailFinding(result: BraveSearchResult): NoveltyFinding {
+function braveResultToRetailFinding(result: TavilySearchResult): NoveltyFinding {
   // Try to identify the retailer from the URL
   const url = new URL(result.url)
   const retailer = identifyRetailer(url.hostname)
@@ -267,7 +263,7 @@ async function runBraveRetailSearch(
  */
 async function analyzeRetailResults(
   request: NoveltyCheckRequest,
-  results: BraveSearchResult[],
+  results: TavilySearchResult[],
   queriesUsed: string[]
 ): Promise<{
   is_novel: boolean
@@ -324,18 +320,14 @@ Analyze each result and return ONLY valid JSON:
 CRITICAL: Base analysis ONLY on provided results. Focus on actual products for sale, not just mentions.`
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await createCompletion(prompt, undefined, {
       model: 'claude-3-haiku-20240307',
-      max_tokens: 2048,
-      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 2048,
     })
 
-    const content = response.content[0]
-    if (content.type !== 'text') {
-      throw new Error('Unexpected response type')
-    }
+    console.log(`[Retail Search Agent] Fallback analysis via ${response.provider}`)
 
-    let jsonText = content.text.trim()
+    let jsonText = response.text.trim()
     const jsonMatch =
       jsonText.match(/```json\n([\s\S]*?)\n```/) ||
       jsonText.match(/```\n([\s\S]*?)\n```/)
@@ -469,19 +461,15 @@ CRITICAL: Your analysis MUST be based on these REAL eBay listings. Do not invent
 Products with higher similarity scores indicate the invention is LESS novel.`
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await createCompletion(analysisPrompt, undefined, {
       model: 'claude-3-haiku-20240307',
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: analysisPrompt }],
+      maxTokens: 4096,
     })
 
-    const content = response.content[0]
-    if (content.type !== 'text') {
-      throw new Error('Unexpected response type from Claude')
-    }
+    console.log(`[Retail Search Agent] eBay analysis via ${response.provider} (${response.model})`)
 
     // Extract JSON from response
-    let jsonText = content.text.trim()
+    let jsonText = response.text.trim()
     const jsonMatch =
       jsonText.match(/```json\n([\s\S]*?)\n```/) ||
       jsonText.match(/```\n([\s\S]*?)\n```/)

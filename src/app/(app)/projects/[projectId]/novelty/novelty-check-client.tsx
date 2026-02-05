@@ -4,11 +4,12 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Search, Download, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Loader2, Search, Download, RefreshCw, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-react'
 import { ProgressStepper, type Step } from '@/components/novelty/progress-stepper'
 import { PatentResults, type PatentFinding } from '@/components/novelty/patent-results'
 import { WebResults, type WebFinding } from '@/components/novelty/web-results'
 import { RetailResults, type RetailFinding } from '@/components/novelty/retail-results'
+import { SearchTips } from '@/components/novelty/search-tips'
 import type { NoveltyCheckResponse } from '@/lib/ai/types'
 
 interface NoveltyCheckClientProps {
@@ -171,6 +172,53 @@ export function NoveltyCheckClient({
     return 'bg-red-100 text-red-700'
   }
 
+  // Get risk level badge with clear labels
+  const getRiskBadge = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high_risk':
+        return <Badge className="bg-red-100 text-red-700">High Risk</Badge>
+      case 'moderate_risk':
+        return <Badge className="bg-amber-100 text-amber-700">Moderate Risk</Badge>
+      case 'low_risk':
+        return <Badge className="bg-green-100 text-green-700">Low Risk</Badge>
+      case 'incomplete':
+        return <Badge className="bg-gray-100 text-gray-600">Incomplete</Badge>
+      default:
+        return null
+    }
+  }
+
+  // Get icon for assessment header based on risk level
+  const getAssessmentIcon = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high_risk':
+        return <AlertCircle className="h-6 w-6 text-red-600" />
+      case 'moderate_risk':
+        return <AlertTriangle className="h-6 w-6 text-amber-600" />
+      case 'low_risk':
+        return <CheckCircle className="h-6 w-6 text-green-600" />
+      case 'incomplete':
+        return <AlertTriangle className="h-6 w-6 text-gray-500" />
+      default:
+        return <CheckCircle className="h-6 w-6 text-neutral-600" />
+    }
+  }
+
+  const getAssessmentBgColor = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high_risk':
+        return 'bg-red-100'
+      case 'moderate_risk':
+        return 'bg-amber-100'
+      case 'low_risk':
+        return 'bg-green-100'
+      case 'incomplete':
+        return 'bg-gray-100'
+      default:
+        return 'bg-neutral-100'
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Progress Stepper */}
@@ -200,6 +248,7 @@ export function NoveltyCheckClient({
                   {description}
                 </p>
               </div>
+              <SearchTips inventionName={inventionName} />
               <Button onClick={runNoveltyCheck} size="lg" className="w-full">
                 <Search className="h-4 w-4 mr-2" />
                 Start Novelty Check
@@ -255,15 +304,13 @@ export function NoveltyCheckClient({
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3">
-                  <div className="h-12 w-12 rounded-lg bg-neutral-100 flex items-center justify-center">
-                    <CheckCircle className="h-6 w-6 text-neutral-600" />
+                  <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${getAssessmentBgColor(results.risk_level)}`}>
+                    {getAssessmentIcon(results.risk_level)}
                   </div>
                   <div>
                     <CardTitle className="flex items-center gap-3">
                       Novelty Assessment
-                      <Badge className={getNoveltyColor(results.overall_novelty_score)}>
-                        {Math.round(results.overall_novelty_score * 100)}% Novel
-                      </Badge>
+                      {getRiskBadge(results.risk_level)}
                     </CardTitle>
                     <CardDescription className="mt-1">
                       {results.recommendation}
@@ -309,6 +356,7 @@ export function NoveltyCheckClient({
             findings={transformPatentFindings(results)}
             summary={results.patent_search_result.summary}
             isNovel={results.patent_search_result.is_novel}
+            searchFailed={results.patent_search_result.truth_scores.completeness === 0}
           />
 
           {/* Web Results */}
