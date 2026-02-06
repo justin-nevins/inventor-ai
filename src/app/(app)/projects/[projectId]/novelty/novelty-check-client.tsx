@@ -4,13 +4,13 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Search, Download, RefreshCw, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-react'
+import { Loader2, Search, Download, RefreshCw, CheckCircle, AlertTriangle, AlertCircle, Sparkles, X, ChevronDown, ChevronUp, Edit2 } from 'lucide-react'
 import { ProgressStepper, type Step } from '@/components/novelty/progress-stepper'
 import { PatentResults, type PatentFinding } from '@/components/novelty/patent-results'
 import { WebResults, type WebFinding } from '@/components/novelty/web-results'
 import { RetailResults, type RetailFinding } from '@/components/novelty/retail-results'
 import { SearchTips } from '@/components/novelty/search-tips'
-import type { NoveltyCheckResponse } from '@/lib/ai/types'
+import type { NoveltyCheckResponse, ExpandedInvention } from '@/lib/ai/types'
 
 interface NoveltyCheckClientProps {
   projectId: string
@@ -20,7 +20,7 @@ interface NoveltyCheckClientProps {
   targetAudience?: string
 }
 
-type CheckStatus = 'idle' | 'running' | 'completed' | 'error'
+type CheckStatus = 'idle' | 'expanding' | 'expanded' | 'running' | 'completed' | 'error'
 
 export function NoveltyCheckClient({
   projectId,
@@ -34,6 +34,11 @@ export function NoveltyCheckClient({
   const [results, setResults] = useState<NoveltyCheckResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // AI Expansion state
+  const [expandedData, setExpandedData] = useState<ExpandedInvention | null>(null)
+  const [editedFeatures, setEditedFeatures] = useState<string[]>([])
+  const [showQueries, setShowQueries] = useState(false)
+
   const steps: Step[] = [
     {
       id: 'describe',
@@ -41,12 +46,22 @@ export function NoveltyCheckClient({
       status: status === 'idle' ? 'pending' : 'completed',
     },
     {
+      id: 'expand',
+      label: 'AI Analysis',
+      status:
+        status === 'expanding'
+          ? 'in_progress'
+          : status === 'expanded' || status === 'running' || status === 'completed'
+          ? 'completed'
+          : 'pending',
+    },
+    {
       id: 'market',
       label: 'Market Research',
       status:
-        status === 'running' && currentStep === 1
+        status === 'running' && currentStep === 2
           ? 'in_progress'
-          : currentStep > 1 || status === 'completed'
+          : currentStep > 2 || status === 'completed'
           ? 'completed'
           : 'pending',
     },
@@ -54,9 +69,9 @@ export function NoveltyCheckClient({
       id: 'patent',
       label: 'Patent Search',
       status:
-        status === 'running' && currentStep === 2
+        status === 'running' && currentStep === 3
           ? 'in_progress'
-          : currentStep > 2 || status === 'completed'
+          : currentStep > 3 || status === 'completed'
           ? 'completed'
           : 'pending',
     },
@@ -67,10 +82,45 @@ export function NoveltyCheckClient({
     },
   ]
 
+  // Step 1: Run AI expansion
+  const runExpansion = async () => {
+    setStatus('expanding')
+    setError(null)
+    setCurrentStep(1)
+
+    try {
+      const response = await fetch('/api/expand-invention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invention_name: inventionName,
+          description,
+          problem_statement: problemStatement,
+          target_audience: targetAudience,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      setExpandedData(data)
+      setEditedFeatures(data.key_features || [])
+      setStatus('expanded')
+    } catch (err) {
+      console.error('AI expansion failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to expand invention')
+      setStatus('error')
+    }
+  }
+
+  // Step 2: Run novelty check with expanded data
   const runNoveltyCheck = async () => {
     setStatus('running')
     setError(null)
-    setCurrentStep(1)
+    setCurrentStep(2)
 
     try {
       // Simulate step progression for UX
@@ -82,7 +132,65 @@ export function NoveltyCheckClient({
           }, 1500)
         })
 
+      // Build the request with expanded data
+      const requestBody: Record<string, unknown> = {
+        invention_name: inventionName,
+        description,
+        problem_statement: problemStatement,
+        target_audience: targetAudience,
+        projectId,
+      }
+
+      // Include expanded data if available (use edited features)
+      if (expandedData) {
+        requestBody.expanded = {
+          ...expandedData,
+          key_features: editedFeatures,
+        }
+      }
+
       // Start the actual API call
+      const fetchPromise = fetch('/api/novelty-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      })
+
+      // Progress through steps while waiting
+      await stepDelay(3)
+
+      const response = await fetchPromise
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      setResults(data)
+      setCurrentStep(4)
+      setStatus('completed')
+    } catch (err) {
+      console.error('Novelty check failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to run novelty check')
+      setStatus('error')
+    }
+  }
+
+  // Skip AI expansion and run directly
+  const skipExpansion = async () => {
+    setStatus('running')
+    setError(null)
+    setCurrentStep(2)
+
+    try {
+      const stepDelay = (step: number) =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            setCurrentStep(step)
+            resolve()
+          }, 1500)
+        })
+
       const fetchPromise = fetch('/api/novelty-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,8 +203,7 @@ export function NoveltyCheckClient({
         }),
       })
 
-      // Progress through steps while waiting
-      await stepDelay(2)
+      await stepDelay(3)
 
       const response = await fetchPromise
       const data = await response.json()
@@ -106,7 +213,7 @@ export function NoveltyCheckClient({
       }
 
       setResults(data)
-      setCurrentStep(3)
+      setCurrentStep(4)
       setStatus('completed')
     } catch (err) {
       console.error('Novelty check failed:', err)
@@ -119,7 +226,13 @@ export function NoveltyCheckClient({
     setStatus('idle')
     setCurrentStep(0)
     setResults(null)
+    setExpandedData(null)
+    setEditedFeatures([])
     setError(null)
+  }
+
+  const removeFeature = (index: number) => {
+    setEditedFeatures(prev => prev.filter((_, i) => i !== index))
   }
 
   // Transform API results to component format
@@ -164,12 +277,6 @@ export function NoveltyCheckClient({
       retailer: finding.metadata?.retailer as string | undefined,
       aiConflictSummary: finding.metadata?.conflict_summary as string | undefined,
     }))
-  }
-
-  const getNoveltyColor = (score: number) => {
-    if (score >= 0.7) return 'bg-green-100 text-green-700'
-    if (score >= 0.4) return 'bg-amber-100 text-amber-700'
-    return 'bg-red-100 text-red-700'
   }
 
   // Get risk level badge with clear labels
@@ -228,7 +335,7 @@ export function NoveltyCheckClient({
         </CardContent>
       </Card>
 
-      {/* Action buttons / status */}
+      {/* Step 1: Idle - Show invention details and expand button */}
       {status === 'idle' && (
         <Card>
           <CardHeader>
@@ -249,27 +356,36 @@ export function NoveltyCheckClient({
                 </p>
               </div>
               <SearchTips inventionName={inventionName} />
-              <Button onClick={runNoveltyCheck} size="lg" className="w-full">
-                <Search className="h-4 w-4 mr-2" />
-                Start Novelty Check
-              </Button>
+              <div className="flex gap-3">
+                <Button onClick={runExpansion} size="lg" className="flex-1">
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Analyze with AI
+                </Button>
+                <Button onClick={skipExpansion} size="lg" variant="outline">
+                  <Search className="h-4 w-4 mr-2" />
+                  Skip to Search
+                </Button>
+              </div>
+              <p className="text-xs text-neutral-400 text-center">
+                AI analysis extracts key features and optimizes search queries for better results
+              </p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {status === 'running' && (
+      {/* Step 2: Expanding - Loading state */}
+      {status === 'expanding' && (
         <Card>
           <CardContent className="py-12">
             <div className="text-center space-y-4">
               <Loader2 className="h-12 w-12 animate-spin text-neutral-400 mx-auto" />
               <div>
                 <h3 className="font-semibold text-lg text-neutral-900">
-                  {currentStep === 1 && 'Searching retail and web...'}
-                  {currentStep === 2 && 'Searching patent databases...'}
+                  Analyzing your invention...
                 </h3>
                 <p className="text-neutral-500 text-sm mt-1">
-                  This may take a minute. Our AI agents are working in parallel.
+                  AI is extracting key features and optimizing search queries
                 </p>
               </div>
             </div>
@@ -277,6 +393,144 @@ export function NoveltyCheckClient({
         </Card>
       )}
 
+      {/* Step 3: Expanded - Show AI analysis results */}
+      {status === 'expanded' && expandedData && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-amber-500" />
+                  AI Analysis Complete
+                </CardTitle>
+                <CardDescription>
+                  Review the extracted features and search queries before running the novelty check
+                </CardDescription>
+              </div>
+              <Badge variant="outline">{expandedData.product_category}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Expanded Description */}
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm text-neutral-700 flex items-center gap-2">
+                Enhanced Description
+                <Edit2 className="h-3 w-3 text-neutral-400" />
+              </h4>
+              <p className="text-sm text-neutral-600 p-3 bg-neutral-50 rounded-lg">
+                {expandedData.expanded_description}
+              </p>
+            </div>
+
+            {/* Key Features */}
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm text-neutral-700">
+                Key Features ({editedFeatures.length})
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {editedFeatures.map((feature, index) => (
+                  <Badge
+                    key={index}
+                    variant="secondary"
+                    className="py-1.5 px-3 text-sm bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  >
+                    {feature}
+                    <button
+                      onClick={() => removeFeature(index)}
+                      className="ml-2 hover:text-blue-900"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Differentiators */}
+            {expandedData.differentiators && expandedData.differentiators.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-sm text-neutral-700">
+                  What Makes This Unique
+                </h4>
+                <ul className="space-y-1">
+                  {expandedData.differentiators.map((diff, index) => (
+                    <li key={index} className="text-sm text-neutral-600 flex items-start gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      {diff}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Search Queries (Collapsible) */}
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowQueries(!showQueries)}
+                className="font-medium text-sm text-neutral-700 flex items-center gap-2 hover:text-neutral-900"
+              >
+                Optimized Search Queries
+                {showQueries ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {showQueries && (
+                <div className="space-y-3 p-3 bg-neutral-50 rounded-lg text-sm">
+                  <div>
+                    <span className="text-neutral-500">Web:</span>{' '}
+                    <span className="text-neutral-700">{expandedData.web_queries?.join(', ')}</span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-500">Retail:</span>{' '}
+                    <span className="text-neutral-700">{expandedData.retail_queries?.join(', ')}</span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-500">Patent:</span>{' '}
+                    <span className="text-neutral-700">{expandedData.patent_queries?.join(', ')}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <Button onClick={runNoveltyCheck} size="lg" className="flex-1">
+                <Search className="h-4 w-4 mr-2" />
+                Run Novelty Check
+              </Button>
+              <Button onClick={resetCheck} size="lg" variant="outline">
+                Start Over
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Running state */}
+      {status === 'running' && (
+        <Card>
+          <CardContent className="py-12">
+            <div className="text-center space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-neutral-400 mx-auto" />
+              <div>
+                <h3 className="font-semibold text-lg text-neutral-900">
+                  {currentStep === 2 && 'Searching retail and web...'}
+                  {currentStep === 3 && 'Searching patent databases...'}
+                </h3>
+                <p className="text-neutral-500 text-sm mt-1">
+                  {expandedData
+                    ? 'Using AI-optimized search queries for better results.'
+                    : 'Our AI agents are working in parallel.'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error state */}
       {status === 'error' && (
         <Card className="border-red-200">
           <CardContent className="py-8">
@@ -288,15 +542,21 @@ export function NoveltyCheckClient({
                 </h3>
                 <p className="text-neutral-500 text-sm mt-1">{error}</p>
               </div>
-              <Button onClick={runNoveltyCheck} variant="outline">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Try Again
-              </Button>
+              <div className="flex gap-3 justify-center">
+                <Button onClick={runExpansion} variant="outline">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Try Again
+                </Button>
+                <Button onClick={resetCheck} variant="ghost">
+                  Start Over
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
 
+      {/* Completed state - Results */}
       {status === 'completed' && results && (
         <>
           {/* Overall Score Card */}

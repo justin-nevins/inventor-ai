@@ -328,9 +328,17 @@ CRITICAL:
  * 2. Analyzes real data with Claude
  */
 export async function runPatentSearchAgent(
-  request: NoveltyCheckRequest
+  request: NoveltyCheckRequest,
+  preGeneratedQueries?: string[]
 ): Promise<NoveltyResult> {
   try {
+    // Log if we have AI-optimized queries from expansion step
+    if (preGeneratedQueries?.length) {
+      console.log(`[Patent Search Agent] AI-expanded queries available:`, preGeneratedQueries)
+      // Note: Patent search has its own sophisticated AI query generation
+      // which produces function/problem/mechanism/synonym query sets
+    }
+
     // Phase 1: Fetch patents from PatentsView (primary) + PTAB (supplementary)
     const { patents, querySet, errors, hasPatentsViewData, hasPTABData } = await fetchPatents(request)
 

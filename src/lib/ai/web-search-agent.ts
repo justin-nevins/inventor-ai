@@ -64,20 +64,25 @@ interface ClaudeAnalysisResult {
 }
 
 export async function runWebSearchAgent(
-  request: NoveltyCheckRequest
+  request: NoveltyCheckRequest,
+  preGeneratedQueries?: string[]
 ): Promise<NoveltyResult> {
   try {
     // ========================================
     // PHASE 1: Get REAL search results from Brave API
     // ========================================
 
-    // Generate search queries based on invention details
-    const searchQueries = generateNoveltySearchQueries(
-      request.invention_name,
-      request.description,
-      request.problem_statement,
-      request.key_features
-    )
+    // Use pre-generated queries from AI expansion, or generate new ones
+    const searchQueries = preGeneratedQueries?.length
+      ? preGeneratedQueries
+      : generateNoveltySearchQueries(
+          request.invention_name,
+          request.description,
+          request.problem_statement,
+          request.key_features
+        )
+
+    console.log(`[Web Search Agent] Using ${preGeneratedQueries ? 'AI-optimized' : 'auto-generated'} queries:`, searchQueries)
 
     // Run multiple searches to get comprehensive results
     const searchResponse = await runMultipleSearches(searchQueries, 5)

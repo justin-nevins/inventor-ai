@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { FolderKanban, Lightbulb, TrendingUp, Clock, Plus } from 'lucide-react'
+import { FolderKanban, Lightbulb, Plus, Search, ShoppingBag, FileSearch } from 'lucide-react'
 import Link from 'next/link'
 import type { Project } from '@/types/database'
 
@@ -30,78 +30,31 @@ export default async function DashboardPage() {
             Welcome back, {user?.user_metadata?.full_name || 'Inventor'}!
           </h2>
           <p className="text-slate-300 mb-4">
-            Ready to validate your next big idea? Let AI guide your market research.
+            Check if your invention idea already exists. We search patents, retail products, and the web.
           </p>
           <Link href="/projects/new">
             <Button className="bg-yellow-500 hover:bg-yellow-600 text-black">
               <Plus className="h-4 w-4 mr-2" />
-              Start New Project
+              Check New Invention
             </Button>
           </Link>
         </div>
 
-        {/* Stats cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Projects
-              </CardTitle>
-              <FolderKanban className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{projectCount}</div>
-              <p className="text-xs text-muted-foreground">
-                invention projects
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Ideas Validated
-              </CardTitle>
-              <Lightbulb className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">0</div>
-              <p className="text-xs text-muted-foreground">
-                market research complete
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Insights Generated
-              </CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">0</div>
-              <p className="text-xs text-muted-foreground">
-                actionable insights
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Time Saved
-              </CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">0h</div>
-              <p className="text-xs text-muted-foreground">
-                vs traditional research
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Single stat card */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Projects
+            </CardTitle>
+            <FolderKanban className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{projectCount}</div>
+            <p className="text-xs text-muted-foreground">
+              invention ideas
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Recent projects */}
         <Card>
@@ -159,30 +112,43 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Quick start guide */}
+        {/* How It Works - focused on novelty check */}
         <Card>
           <CardHeader>
-            <CardTitle>How It Works</CardTitle>
+            <CardTitle>How Novelty Check Works</CardTitle>
             <CardDescription>
-              AI-powered market research in 7 simple steps
+              AI-powered search across three channels
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { step: 1, title: 'Define Your Idea', desc: 'Describe your invention and target audience' },
-                { step: 2, title: 'Find Communities', desc: 'AI discovers where your audience hangs out' },
-                { step: 3, title: 'Analyze Sentiment', desc: 'Understand pain points and desires' },
-                { step: 4, title: 'Get Insights', desc: 'Receive actionable market intelligence' },
-              ].map((item) => (
-                <div key={item.step} className="text-center p-4">
-                  <div className="h-10 w-10 rounded-full bg-slate-900 text-white flex items-center justify-center mx-auto mb-3 font-bold">
-                    {item.step}
-                  </div>
-                  <h4 className="font-medium mb-1">{item.title}</h4>
-                  <p className="text-sm text-muted-foreground">{item.desc}</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="text-center p-4 rounded-lg bg-blue-50">
+                <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
+                  <Search className="h-6 w-6 text-blue-600" />
                 </div>
-              ))}
+                <h4 className="font-medium mb-1">Web Search</h4>
+                <p className="text-sm text-muted-foreground">
+                  Kickstarter, Indiegogo, Product Hunt, blogs, and news
+                </p>
+              </div>
+              <div className="text-center p-4 rounded-lg bg-green-50">
+                <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                  <ShoppingBag className="h-6 w-6 text-green-600" />
+                </div>
+                <h4 className="font-medium mb-1">Retail Search</h4>
+                <p className="text-sm text-muted-foreground">
+                  Amazon, Etsy, Alibaba, eBay, Walmart, and more
+                </p>
+              </div>
+              <div className="text-center p-4 rounded-lg bg-purple-50">
+                <div className="h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-3">
+                  <FileSearch className="h-6 w-6 text-purple-600" />
+                </div>
+                <h4 className="font-medium mb-1">Patent Search</h4>
+                <p className="text-sm text-muted-foreground">
+                  USPTO database with AI-powered query generation
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

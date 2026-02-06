@@ -1,11 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
-import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import type { Message, Project, Conversation, ConversationInsert, MessageInsert } from '@/types/database'
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+import { createChatCompletion, type ChatMessage } from '@/lib/ai/ai-client'
 
 const SYSTEM_PROMPT = `You are InventorAI, an expert AI assistant for inventors and product creators. Your role is to help inventors:
 
@@ -113,16 +109,18 @@ export async function POST(request: Request) {
       }
     }
 
-    // Call Claude API
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT + projectContext,
-      messages: messages,
-    })
+    // Call AI API (Anthropic with OpenAI fallback)
+    const response = await createChatCompletion(
+      messages as ChatMessage[],
+      SYSTEM_PROMPT + projectContext,
+      {
+        model: 'claude-3-haiku-20240307',
+        maxTokens: 2048,
+      }
+    )
 
-    const assistantMessage =
-      response.content[0].type === 'text' ? response.content[0].text : ''
+    const assistantMessage = response.text
+    console.log(`[Chat API] Response via ${response.provider} (${response.model})`)
 
     // Save messages to database
     const messagesToInsert: MessageInsert[] = [

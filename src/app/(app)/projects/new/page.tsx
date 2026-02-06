@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowLeft, Lightbulb, Users, Target } from 'lucide-react'
+import { ArrowLeft, Lightbulb, Users, Target, Wrench, Sparkles } from 'lucide-react'
 import Link from 'next/link'
 import type { Project, ProjectInsert } from '@/types/database'
 import type { PostgrestError } from '@supabase/supabase-js'
@@ -17,6 +17,8 @@ import type { PostgrestError } from '@supabase/supabase-js'
 export default function NewProjectPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [mechanism, setMechanism] = useState('')
+  const [keyFeatures, setKeyFeatures] = useState('')
   const [problemStatement, setProblemStatement] = useState('')
   const [targetAudience, setTargetAudience] = useState('')
   const [loading, setLoading] = useState(false)
@@ -37,10 +39,17 @@ export default function NewProjectPage() {
       return
     }
 
+    // Combine description with mechanism and key features for better search
+    const fullDescription = [
+      description,
+      mechanism ? `\n\nHow it works: ${mechanism}` : '',
+      keyFeatures ? `\n\nKey differentiators: ${keyFeatures}` : '',
+    ].filter(Boolean).join('')
+
     const projectData: ProjectInsert = {
       user_id: user.id,
       name,
-      description,
+      description: fullDescription,
       problem_statement: problemStatement,
       target_audience: targetAudience,
       status: 'draft',
@@ -80,11 +89,11 @@ export default function NewProjectPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Lightbulb className="h-5 w-5 text-yellow-500" />
-                Create New Invention Project
+                Describe Your Invention
               </CardTitle>
               <CardDescription>
-                Tell us about your invention idea. The more detail you provide,
-                the better our AI can help with market research.
+                We&apos;ll search patents, retail products, and the web to check if similar products exist.
+                The more detail you provide, the more accurate our search.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -116,6 +125,41 @@ export default function NewProjectPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     A short summary of what your invention does
+                  </p>
+                </div>
+
+                {/* Mechanism - How it works */}
+                <div className="space-y-2">
+                  <Label htmlFor="mechanism" className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4" />
+                    How It Works
+                  </Label>
+                  <Textarea
+                    id="mechanism"
+                    placeholder="e.g., Uses a spring-loaded mechanism to... Attaches via suction cup... Connects via Bluetooth..."
+                    value={mechanism}
+                    onChange={(e) => setMechanism(e.target.value)}
+                    rows={3}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Describe the mechanism or technology. This helps find similar patents.
+                  </p>
+                </div>
+
+                {/* Key Differentiators */}
+                <div className="space-y-2">
+                  <Label htmlFor="keyFeatures" className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    What Makes It Different
+                  </Label>
+                  <Input
+                    id="keyFeatures"
+                    placeholder="e.g., No electricity needed, Works with any surface, Under $5 to manufacture"
+                    value={keyFeatures}
+                    onChange={(e) => setKeyFeatures(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    List 2-3 things that make your invention unique (comma-separated)
                   </p>
                 </div>
 
@@ -177,23 +221,23 @@ export default function NewProjectPage() {
             </CardContent>
           </Card>
 
-          {/* Tips */}
+          {/* Tips for better search results */}
           <Card className="bg-slate-50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Tips for Better Research</CardTitle>
+              <CardTitle className="text-sm">Tips for Better Search Results</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground space-y-2">
               <p>
-                <strong>Be specific about the problem:</strong> Instead of &quot;saves time,&quot;
-                describe the exact frustration your invention solves.
+                <strong>Describe what it does:</strong> &quot;A device that keeps drinks cold&quot;
+                searches better than &quot;innovative beverage solution.&quot;
               </p>
               <p>
-                <strong>Define your audience clearly:</strong> &quot;Everyone&quot; isn&apos;t a
-                target market. Narrow it down to who would buy first.
+                <strong>Include the mechanism:</strong> How does it work? &quot;Uses vacuum insulation&quot;
+                or &quot;attaches via suction cup&quot; helps find similar patents.
               </p>
               <p>
-                <strong>Think about use cases:</strong> When and where would someone
-                use your invention?
+                <strong>Be specific about the problem:</strong> &quot;Prevents coffee from getting cold
+                during long meetings&quot; finds relevant competitors.
               </p>
             </CardContent>
           </Card>

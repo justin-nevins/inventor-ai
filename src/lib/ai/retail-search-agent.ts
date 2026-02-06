@@ -355,8 +355,14 @@ CRITICAL: Base analysis ONLY on provided results. Focus on actual products for s
 }
 
 export async function runRetailSearchAgent(
-  request: NoveltyCheckRequest
+  request: NoveltyCheckRequest,
+  preGeneratedQueries?: string[]
 ): Promise<NoveltyResult> {
+  // Log if we have AI-optimized queries (for debugging)
+  if (preGeneratedQueries?.length) {
+    console.log(`[Retail Search Agent] AI-optimized queries available:`, preGeneratedQueries)
+  }
+
   // Check if eBay is configured - if not, return "not configured" result
   // Previously this fell back to Brave, but that doubled Brave API usage
   // causing unexpected rate limit exhaustion

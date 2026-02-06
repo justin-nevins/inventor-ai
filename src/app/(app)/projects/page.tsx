@@ -3,7 +3,7 @@ import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Plus, FolderKanban, MoreHorizontal } from 'lucide-react'
+import { Plus, FolderKanban, MoreHorizontal, FlaskConical } from 'lucide-react'
 import Link from 'next/link'
 import {
   DropdownMenu,
@@ -36,15 +36,15 @@ export default async function ProjectsPage() {
         {/* Header with actions */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">Your Invention Projects</h2>
+            <h2 className="text-2xl font-bold">Your Inventions</h2>
             <p className="text-muted-foreground">
-              Manage and track your product ideas
+              Check if your ideas already exist
             </p>
           </div>
           <Link href="/projects/new">
             <Button>
               <Plus className="h-4 w-4 mr-2" />
-              New Project
+              New Invention
             </Button>
           </Link>
         </div>
@@ -80,13 +80,14 @@ export default async function ProjectsPage() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
-                          <Link href={`/projects/${project.id}`}>
-                            View Details
+                          <Link href={`/projects/${project.id}/novelty`}>
+                            <FlaskConical className="h-4 w-4 mr-2" />
+                            Run Novelty Check
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem asChild>
-                          <Link href={`/projects/${project.id}/chat`}>
-                            Start Research
+                          <Link href={`/projects/${project.id}`}>
+                            View Details
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem className="text-red-600">
@@ -118,15 +119,15 @@ export default async function ProjectsPage() {
             <CardContent className="py-16">
               <div className="text-center">
                 <FolderKanban className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-xl font-semibold mb-2">No projects yet</h3>
+                <h3 className="text-xl font-semibold mb-2">No inventions yet</h3>
                 <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-                  Create your first invention project to start validating your idea
-                  with AI-powered market research.
+                  Describe your invention idea and we&apos;ll search patents, retail products,
+                  and the web to see if it already exists.
                 </p>
                 <Link href="/projects/new">
                   <Button size="lg">
                     <Plus className="h-5 w-5 mr-2" />
-                    Create Your First Project
+                    Check Your First Invention
                   </Button>
                 </Link>
               </div>

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { runWebSearchAgent } from '@/lib/ai/web-search-agent'
 import { runRetailSearchAgent } from '@/lib/ai/retail-search-agent'
 import { runPatentSearchAgent } from '@/lib/ai/patent-search-agent'
-import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores, RiskLevel, NoveltyFinding } from '@/lib/ai/types'
+import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores, RiskLevel, NoveltyFinding, ExpandedInvention } from '@/lib/ai/types'
 import type { AiMemoryInsert, Json } from '@/types/database'
 
 export async function POST(request: Request) {
@@ -17,7 +17,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { invention_name, description, problem_statement, target_audience, key_features, projectId } = body
+    const { invention_name, description, problem_statement, target_audience, key_features, projectId, expanded } = body as {
+      invention_name: string
+      description: string
+      problem_statement?: string
+      target_audience?: string
+      key_features?: string[]
+      projectId?: string
+      expanded?: ExpandedInvention
+    }
 
     if (!invention_name || !description) {
       return NextResponse.json(
@@ -26,19 +34,21 @@ export async function POST(request: Request) {
       )
     }
 
+    // Use expanded key_features if available
     const noveltyRequest: NoveltyCheckRequest = {
       invention_name,
-      description,
+      description: expanded?.expanded_description || description,
       problem_statement,
       target_audience,
-      key_features,
+      key_features: expanded?.key_features || key_features,
     }
 
     // Run all 3 agents in parallel for speed
+    // Pass pre-generated queries from AI expansion if available
     const [webResult, retailResult, patentResult] = await Promise.all([
-      runWebSearchAgent(noveltyRequest),
-      runRetailSearchAgent(noveltyRequest),
-      runPatentSearchAgent(noveltyRequest),
+      runWebSearchAgent(noveltyRequest, expanded?.web_queries),
+      runRetailSearchAgent(noveltyRequest, expanded?.retail_queries),
+      runPatentSearchAgent(noveltyRequest, expanded?.patent_queries),
     ])
 
     // Detect failed agents (completeness === 0 means API failed)
