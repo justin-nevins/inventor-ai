@@ -353,18 +353,22 @@ export async function runPatentSearchAgent(
       }
     }
 
-    // Check for server errors
-    const serverErrors = errors.filter(e => e.includes('500') || e.includes('Internal Server Error'))
+    // Check for API errors (server errors OR bad request errors)
+    const apiErrors = errors.filter(e =>
+      e.includes('500') || e.includes('Internal Server Error') ||
+      e.includes('400') || e.includes('error') ||
+      e.includes('failed')
+    )
 
-    // If we found no patents AND had server errors from ALL configured APIs, we can't trust the results
-    const allApisErrored = !hasPatentsViewData && serverErrors.length > 0
+    // If we found no patents AND had API errors, we can't trust the results
+    const allApisErrored = !hasPatentsViewData && apiErrors.length > 0
     if (allApisErrored) {
       return {
         agent_type: 'patent_search',
         is_novel: false,
         confidence: 0,
         findings: [],
-        summary: `Patent APIs are experiencing server issues (${serverErrors.length} requests failed). Unable to complete patent search. Please try again later or consult a patent attorney.`,
+        summary: `Patent search encountered errors (${apiErrors.length} requests failed). Unable to complete patent search. Please try again later or consult a patent attorney.`,
         truth_scores: {
           objective_truth: 0,
           practical_truth: 0.2,

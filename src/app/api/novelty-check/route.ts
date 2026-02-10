@@ -7,6 +7,9 @@ import { runPatentSearchAgent } from '@/lib/ai/patent-search-agent'
 import type { NoveltyCheckRequest, NoveltyCheckResponse, GraduatedTruthScores, RiskLevel, NoveltyFinding, ExpandedInvention } from '@/lib/ai/types'
 import type { AiMemoryInsert, Json } from '@/types/database'
 
+// Patent search can take 30-60s due to rate-limited API calls + AI analysis
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()

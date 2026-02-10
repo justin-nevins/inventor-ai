@@ -818,7 +818,7 @@ export class PatentsViewClient {
   private readonly minRequestInterval = 1334 // 45 req/min = ~1334ms between requests
 
   constructor(apiKey?: string) {
-    const key = apiKey || process.env.PATENTSVIEW_API_KEY
+    const key = (apiKey || process.env.PATENTSVIEW_API_KEY)?.trim()
     if (!key) {
       throw new Error('PATENTSVIEW_API_KEY required. Request at https://patentsview.org/apis/keyrequest')
     }
@@ -847,12 +847,31 @@ export class PatentsViewClient {
     operator: '_text_phrase' | '_text_any',
     limit: number
   ): Promise<PatentsViewSearchResult> {
+    // Sanitize search text: remove special chars that may cause API issues
+    const cleanText = searchText
+      .replace(/['"\\\/(){}[\]<>@#$%^&*+=|~`]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (!cleanText) {
+      return { patents: [], total_hits: 0, count: 0, error: false }
+    }
+
     const query = {
       _or: [
-        { [operator]: { patent_title: searchText } },
-        { [operator]: { patent_abstract: searchText } },
+        { [operator]: { patent_title: cleanText } },
+        { [operator]: { patent_abstract: cleanText } },
       ]
     }
+
+    const requestBody = {
+      q: query,
+      f: ['patent_id', 'patent_title', 'patent_abstract', 'patent_date', 'patent_type', 'assignees'],
+      o: { size: limit },
+      s: [{ patent_date: 'desc' }],
+    }
+
+    console.log(`[PatentsView] ${operator} query: "${cleanText}" (limit: ${limit})`)
 
     const response = await fetch(PATENTSVIEW_BASE_URL, {
       method: 'POST',
@@ -860,12 +879,7 @@ export class PatentsViewClient {
         'Content-Type': 'application/json',
         'X-Api-Key': this.apiKey,
       },
-      body: JSON.stringify({
-        q: query,
-        f: ['patent_id', 'patent_title', 'patent_abstract', 'patent_date', 'patent_type', 'patent_kind', 'assignees'],
-        o: { size: limit },
-        s: [{ patent_date: 'desc' }],
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
@@ -876,6 +890,7 @@ export class PatentsViewClient {
         throw new Error('PatentsView API rate limit exceeded (45/min). Please wait.')
       }
       const errorBody = await response.text()
+      console.error(`[PatentsView] ${response.status} error for "${cleanText}":`, errorBody)
       throw new Error(`PatentsView API error ${response.status}: ${errorBody}`)
     }
 
