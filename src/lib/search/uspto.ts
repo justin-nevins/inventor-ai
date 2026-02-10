@@ -899,13 +899,20 @@ export class PatentsViewClient {
 
     try {
       const searchText = params.searchTerms.join(' ')
+      let data: PatentsViewSearchResult
 
       // Try _text_phrase first for precise matching
-      let data = await this.executeSearch(searchText, '_text_phrase', params.limit || 25)
+      // Inner try/catch: if phrase search returns 400, fall through to _text_any
+      try {
+        data = await this.executeSearch(searchText, '_text_phrase', params.limit || 25)
+      } catch (phraseError) {
+        console.log(`[PatentsView] Phrase search error, falling back to _text_any:`, phraseError instanceof Error ? phraseError.message : phraseError)
+        data = { patents: [], total_hits: 0, count: 0, error: false }
+      }
 
-      // Fall back to _text_any if phrase search finds nothing
+      // Fall back to _text_any if phrase search found nothing or errored
       if ((!data.patents || data.patents.length === 0) && searchText.split(' ').length > 1) {
-        console.log(`[PatentsView] Phrase search returned 0 results, falling back to _text_any`)
+        console.log(`[PatentsView] Using _text_any fallback for: "${searchText}"`)
         await this.enforceRateLimit()
         data = await this.executeSearch(searchText, '_text_any', params.limit || 25)
       }
