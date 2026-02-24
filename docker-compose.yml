@@ -8,7 +8,7 @@ services:
     container_name: inventor-ai
     restart: unless-stopped
     ports:
-      - "3100:3000"
+      - "3102:3000"
     env_file:
       - .env
     networks:
