@@ -54,6 +54,13 @@ Every AI output includes scores (0-1):
 - `research_*` - Market research data
 - `knowledge_articles` - Curated blog content
 
+## Deployment
+
+**CRITICAL: Deploys from GitHub (master branch), NOT from local.**
+- NEVER run `vercel --prod` or `vercel deploy` from local. This overrides the GitHub-based deployment pipeline.
+- To redeploy with updated env vars, use `vercel redeploy <existing-deployment-url>` to rebuild from the same GitHub commit.
+- When adding env vars via CLI, use `printf` (not `echo`) to avoid trailing newlines: `printf 'value' | vercel env add KEY production`
+
 ## Commands
 ```bash
 npm run dev      # Start development server

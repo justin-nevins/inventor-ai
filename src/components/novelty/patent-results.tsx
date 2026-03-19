@@ -33,6 +33,76 @@ function getInitialConflictLevel(similarity: number): ConflictLevel {
   return 'low'
 }
 
+function parseSummary(summary: string) {
+  const sections = summary.split('\n\n').filter(Boolean)
+  const parsed: { type: string; content: string }[] = []
+
+  for (const section of sections) {
+    const trimmed = section.trim()
+    if (trimmed.startsWith('Based on ') || trimmed.startsWith('No matching patents') || trimmed.startsWith('No patent data')) {
+      parsed.push({ type: 'metadata', content: trimmed })
+    } else if (trimmed.startsWith('Search strategy:')) {
+      parsed.push({ type: 'metadata', content: trimmed })
+    } else if (trimmed.startsWith('Patentability:')) {
+      parsed.push({ type: 'assessment', content: trimmed.replace('Patentability: ', '') })
+    } else if (trimmed.startsWith('Key differentiators:')) {
+      parsed.push({ type: 'differentiators', content: trimmed.replace('Key differentiators: ', '') })
+    } else if (trimmed.startsWith('Note:') || trimmed.startsWith('NOTE:') || trimmed.startsWith('IMPORTANT:')) {
+      parsed.push({ type: 'note', content: trimmed })
+    } else if (trimmed.startsWith('Search warnings:')) {
+      parsed.push({ type: 'warning', content: trimmed.replace('Search warnings: ', '') })
+    } else {
+      parsed.push({ type: 'summary', content: trimmed })
+    }
+  }
+
+  return parsed
+}
+
+function PatentSummaryDisplay({ summary }: { summary: string }) {
+  const sections = parseSummary(summary)
+
+  return (
+    <div className="mt-2 space-y-3">
+      {sections.map((section, i) => {
+        switch (section.type) {
+          case 'summary':
+            return <p key={i} className="text-sm text-neutral-600 leading-relaxed">{section.content}</p>
+          case 'metadata':
+            return <p key={i} className="text-xs text-neutral-400">{section.content}</p>
+          case 'assessment':
+            return (
+              <div key={i} className="rounded-md bg-blue-50 px-3 py-2">
+                <p className="text-xs font-medium text-blue-800">Patentability Assessment</p>
+                <p className="text-sm text-blue-700 mt-1 leading-relaxed">{section.content}</p>
+              </div>
+            )
+          case 'differentiators':
+            return (
+              <div key={i}>
+                <p className="text-xs font-medium text-neutral-700 mb-1">Key Differentiators</p>
+                <ul className="space-y-1">
+                  {section.content.split('; ').map((item, j) => (
+                    <li key={j} className="text-sm text-neutral-600 flex items-start gap-2">
+                      <span className="text-green-500 mt-0.5 shrink-0">•</span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          case 'note':
+            return <p key={i} className="text-xs text-neutral-400 italic">{section.content}</p>
+          case 'warning':
+            return <p key={i} className="text-xs text-amber-600">{section.content}</p>
+          default:
+            return <p key={i} className="text-sm text-neutral-600">{section.content}</p>
+        }
+      })}
+    </div>
+  )
+}
+
 export function PatentResults({
   findings,
   summary,
@@ -94,7 +164,7 @@ export function PatentResults({
                   <AlertCircle className="h-4 w-4 text-amber-500" />
                 )}
               </CardTitle>
-              <CardDescription className="mt-1">{summary}</CardDescription>
+              <PatentSummaryDisplay summary={summary} />
             </div>
           </div>
           <div className="flex gap-2 shrink-0">

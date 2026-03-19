@@ -199,9 +199,9 @@ export function NoveltyCheckButton({
                   <AlertCircle className="h-4 w-4 text-yellow-500" />
                 )}
               </CardTitle>
-              <CardDescription className="text-xs">
+              <div className="text-xs text-muted-foreground whitespace-pre-line">
                 {results.patent_search_result.summary}
-              </CardDescription>
+              </div>
             </CardHeader>
             {results.patent_search_result.findings.length > 0 && (
               <CardContent>
