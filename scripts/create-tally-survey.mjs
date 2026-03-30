@@ -156,8 +156,18 @@ const blocks = [
   ...scale('Progress tracking and accountability system', 'Not valuable', 'Extremely valuable'),
   ...scale('Video courses teaching the licensing process', 'Not valuable', 'Extremely valuable'),
   ...scale('1-on-1 coaching with an experienced inventor', 'Not valuable', 'Extremely valuable'),
-  ...mc('How much would you be willing to pay monthly for a comprehensive inventor support service?', [
-    '$0 (free only)', '$1-25/month', '$26-50/month', '$51-100/month', '$100+/month', "I'd prefer one-time payments",
+  text('<p>Think about the tool you just described - the one that would help you succeed as an inventor. Consider what that would be worth to you each month.</p>'),
+  ...mc('At what monthly price would this service be so cheap you would question its quality?', [
+    '$10/month', '$25/month', '$75/month', '$125/month', '$200/month',
+  ]),
+  ...mc('At what monthly price would this service feel like a great deal?', [
+    '$10/month', '$25/month', '$75/month', '$125/month', '$200/month',
+  ]),
+  ...mc('At what monthly price would this service start to feel expensive, but you would still consider it?', [
+    '$10/month', '$25/month', '$75/month', '$125/month', '$200/month',
+  ]),
+  ...mc('At what monthly price would this service be too expensive to consider, no matter what it included?', [
+    '$10/month', '$25/month', '$75/month', '$125/month', '$200/month',
   ]),
 
   pageBreak(),
